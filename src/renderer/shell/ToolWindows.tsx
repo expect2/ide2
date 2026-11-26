@@ -124,6 +124,7 @@ export interface ProjectToolWindowProps {
   worktreeName: string;
   files: readonly FileEntry[];
   activeFilePath?: string;
+  locateRequest?: { filePath: string; seq: number } | null;
   annotations?: readonly Annotation[];
   activeWorktreePath?: string;
   platform: Platform;
@@ -257,6 +258,7 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
   worktreeName,
   files,
   activeFilePath,
+  locateRequest,
   annotations = [],
   activeWorktreePath,
   platform,
@@ -304,9 +306,9 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
     });
   };
 
-  const locateActiveFile = () => {
-    if (!activeFilePath) return;
-    const parts = activeFilePath.split("/").filter(Boolean);
+  const locateFilePath = (targetPath?: string) => {
+    if (!targetPath) return;
+    const parts = targetPath.split("/").filter(Boolean);
     if (parts.length > 1) {
       setExpanded((prev) => {
         const next = new Set(prev);
@@ -319,11 +321,19 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
       });
     }
     window.setTimeout(() => {
-      const el = rowRefs.current.get(activeFilePath);
+      const el = rowRefs.current.get(targetPath);
       el?.scrollIntoView({ block: "nearest" });
       el?.focus();
-    }, 16);
+    }, 24);
   };
+
+  const locateActiveFile = () => locateFilePath(activeFilePath);
+
+  useEffect(() => {
+    if (locateRequest?.filePath) {
+      locateFilePath(locateRequest.filePath);
+    }
+  }, [locateRequest?.seq, locateRequest?.filePath]);
 
   return (
     <section

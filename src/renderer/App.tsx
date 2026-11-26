@@ -45,6 +45,18 @@ import {
 } from "./shell/Popups.js";
 import { Statusline } from "./shell/Statusline.js";
 import {
+  closeAllTabs,
+  closeOtherTabs,
+  closeTab,
+  closeTabsToLeft,
+  closeTabsToRight,
+  closeUnmodifiedTabs,
+  togglePinTab,
+  type EditorTab,
+  type SplitDirection,
+} from "./shell/tab-actions.js";
+import { TabContextMenu } from "./shell/TabContextMenu.js";
+import {
   AnnotationsToolWindow,
   GitToolWindow,
   ProjectToolWindow,
@@ -56,18 +68,11 @@ import { CodeViewport } from "./views/CodeViewport.js";
 import { DiffViewport, type DiffViewMode } from "./views/DiffViewport.js";
 import { MarkdownViewer, type MarkdownViewMode } from "./views/MarkdownViewer.js";
 
-interface EditorTab {
-  id: string;
-  filePath: string;
-  viewKind: "code" | "diff";
-  diffScope?: DiffScope;
-  markdownMode?: MarkdownViewMode;
-}
-
 interface WorktreeSessionState {
   tabs: EditorTab[];
   activeTabId: string | null;
   splitTabId: string | null;
+  splitDirection?: SplitDirection;
   diffScope: DiffScope;
 }
 
@@ -175,6 +180,15 @@ export const App: React.FC = () => {
   const [goToLineOpen, setGoToLineOpen] = useState<boolean>(false);
   const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [tabContextMenu, setTabContextMenu] = useState<{
+    tabId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [projectLocateReq, setProjectLocateReq] = useState<{
+    filePath: string;
+    seq: number;
+  } | null>(null);
 
   // Navigation History & Recent Files
   const navStackRef = useRef<{ items: NavHistoryEntry[]; index: number }>({
@@ -571,33 +585,40 @@ export const App: React.FC = () => {
     [activeWorktreePath, showToast],
   );
 
-  const handleCloseTab = useCallback(
-    (tabId: string) => {
+  const updateActiveSessionTabs = useCallback(
+    (updater: (session: WorktreeSessionState) => WorktreeSessionState) => {
       if (!activeWorktreePath) return;
       setSessions((prev) => {
         const s = prev[activeWorktreePath];
         if (!s) return prev;
-        const idx = s.tabs.findIndex((t) => t.id === tabId);
-        if (idx === -1) return prev;
-        const nextTabs = s.tabs.filter((t) => t.id !== tabId);
-        const nextActive =
-          s.activeTabId === tabId
-            ? (nextTabs[Math.min(idx, nextTabs.length - 1)]?.id ?? null)
-            : s.activeTabId;
-        const nextSplit = s.splitTabId === tabId ? null : s.splitTabId;
         return {
           ...prev,
-          [activeWorktreePath]: {
-            ...s,
-            tabs: nextTabs,
-            activeTabId: nextActive,
-            splitTabId: nextSplit,
-          },
+          [activeWorktreePath]: updater(s),
         };
       });
     },
     [activeWorktreePath],
   );
+
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      updateActiveSessionTabs((s) => ({ ...s, ...closeTab(s, tabId) }));
+    },
+    [updateActiveSessionTabs],
+  );
+
+  const modifiedFilePathSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of changedByWt[activeWorktreePath] ?? []) {
+      set.add(c.path);
+    }
+    for (const f of filesByWt[activeWorktreePath] ?? []) {
+      if (f.gitStatus && f.gitStatus !== "clean") {
+        set.add(f.path);
+      }
+    }
+    return set;
+  }, [changedByWt, filesByWt, activeWorktreePath]);
 
   const handleSymbolActivate = useCallback(
     async (params: { symbolName: string; line: number; mode: "definition" | "usages" }) => {
@@ -1301,6 +1322,7 @@ export const App: React.FC = () => {
                 worktreeName={activeWorktree.name}
                 files={filesByWt[activeWorktreePath] ?? []}
                 activeFilePath={activeTab?.filePath}
+                locateRequest={projectLocateReq}
                 annotations={worktreeAnnotations}
                 activeWorktreePath={activeWorktreePath}
                 platform={platform}
@@ -1350,7 +1372,18 @@ export const App: React.FC = () => {
                       key={tab.id}
                       role="tab"
                       aria-selected={isActive}
-                      className={`tab-item${isActive ? " active" : ""}`}
+                      className={`tab-item${isActive ? " active" : ""}${tab.pinned ? " pinned" : ""}`}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setTabContextMenu({ tabId: tab.id, x: e.clientX, y: e.clientY });
+                      }}
+                      onAuxClick={(e) => {
+                        if (e.button === 1) {
+                          e.preventDefault();
+                          handleCloseTab(tab.id);
+                        }
+                      }}
                       onClick={() => {
                         setSessions((prev) => ({
                           ...prev,
@@ -1374,6 +1407,14 @@ export const App: React.FC = () => {
                         }
                       }}
                     >
+                      {tab.pinned && (
+                        <span
+                          title="Pinned tab"
+                          style={{ color: "var(--sky)", fontSize: "10px", lineHeight: 1 }}
+                        >
+                          ●
+                        </span>
+                      )}
                       {tab.viewKind === "diff" && (
                         <span style={{ color: "var(--unknown)", fontSize: "10px" }}>DIFF</span>
                       )}
@@ -1386,13 +1427,18 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         className="tab-close-btn"
-                        aria-label={`Close ${baseName}`}
+                        aria-label={tab.pinned ? `Unpin ${baseName}` : `Close ${baseName}`}
+                        title={tab.pinned ? "Unpin Tab" : `Close (${formatShortcut("close-tab", platform)})`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleCloseTab(tab.id);
+                          if (tab.pinned) {
+                            updateActiveSessionTabs((s) => ({ ...s, ...togglePinTab(s, tab.id) }));
+                          } else {
+                            handleCloseTab(tab.id);
+                          }
                         }}
                       >
-                        ×
+                        {tab.pinned ? "▾" : "×"}
                       </button>
                     </div>
                   );
@@ -1416,13 +1462,24 @@ export const App: React.FC = () => {
 
             {/* Viewport or Split Viewports */}
             {activeTab ? (
-              <div className="editor-split">
+              <div
+                className="editor-split"
+                style={{
+                  flexDirection: currentSession.splitDirection === "down" ? "column" : "row",
+                }}
+              >
                 <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
                   {renderTabViewport(activeTab, false)}
                 </div>
                 {splitTab && (
                   <>
-                    <div className="split-resizer split-resizer-col" />
+                    <div
+                      className={`split-resizer ${
+                        currentSession.splitDirection === "down"
+                          ? "split-resizer-row"
+                          : "split-resizer-col"
+                      }`}
+                    />
                     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
                       {renderTabViewport(splitTab, true)}
                     </div>
@@ -1656,6 +1713,120 @@ export const App: React.FC = () => {
         }}
         onClose={() => setExportModalOpen(false)}
       />
+
+      {/* JetBrains Editor Tab Context Menu */}
+      {tabContextMenu && (() => {
+        const menuTabIndex = currentSession.tabs.findIndex(
+          (t) => t.id === tabContextMenu.tabId,
+        );
+        const menuTab = menuTabIndex >= 0 ? currentSession.tabs[menuTabIndex] : undefined;
+        if (!menuTab) return null;
+
+        const hasOtherClosableTabs = currentSession.tabs.some(
+          (t) => t.id !== menuTab.id && !t.pinned,
+        );
+        const hasLeftClosableTabs = currentSession.tabs.some(
+          (t, i) => i < menuTabIndex && !t.pinned,
+        );
+        const hasRightClosableTabs = currentSession.tabs.some(
+          (t, i) => i > menuTabIndex && !t.pinned,
+        );
+        const hasUnmodifiedClosableTabs = currentSession.tabs.some(
+          (t) => !t.pinned && !modifiedFilePathSet.has(t.filePath),
+        );
+
+        return (
+          <TabContextMenu
+            x={tabContextMenu.x}
+            y={tabContextMenu.y}
+            tab={menuTab}
+            tabIndex={menuTabIndex}
+            totalTabs={currentSession.tabs.length}
+            hasOtherClosableTabs={hasOtherClosableTabs}
+            hasLeftClosableTabs={hasLeftClosableTabs}
+            hasRightClosableTabs={hasRightClosableTabs}
+            hasUnmodifiedClosableTabs={hasUnmodifiedClosableTabs}
+            hasSplitOpen={Boolean(currentSession.splitTabId)}
+            currentLine={cursorPos.line}
+            isActiveTab={menuTab.id === currentSession.activeTabId}
+            worktreePath={activeWorktreePath}
+            platform={platform}
+            onCloseTab={(id) => handleCloseTab(id)}
+            onCloseOtherTabs={(id) =>
+              updateActiveSessionTabs((s) => ({ ...s, ...closeOtherTabs(s, id) }))
+            }
+            onCloseAllTabs={() =>
+              updateActiveSessionTabs((s) => ({ ...s, ...closeAllTabs(s) }))
+            }
+            onCloseTabsToLeft={(id) =>
+              updateActiveSessionTabs((s) => ({ ...s, ...closeTabsToLeft(s, id) }))
+            }
+            onCloseTabsToRight={(id) =>
+              updateActiveSessionTabs((s) => ({ ...s, ...closeTabsToRight(s, id) }))
+            }
+            onCloseUnmodifiedTabs={() =>
+              updateActiveSessionTabs((s) => ({
+                ...s,
+                ...closeUnmodifiedTabs(s, modifiedFilePathSet),
+              }))
+            }
+            onTogglePinTab={(id) =>
+              updateActiveSessionTabs((s) => ({ ...s, ...togglePinTab(s, id) }))
+            }
+            onSplitTab={(id, direction) => {
+              const targetTab = currentSession.tabs.find((t) => t.id === id);
+              if (targetTab) {
+                if (targetTab.viewKind === "diff") {
+                  void loadDiffDocument(
+                    activeWorktreePath,
+                    targetTab.filePath,
+                    targetTab.diffScope ?? currentSession.diffScope,
+                  );
+                } else if (!docsCache[`${activeWorktreePath}::${targetTab.filePath}`]) {
+                  void loadFileDocument(
+                    activeWorktreePath,
+                    targetTab.filePath,
+                    currentSession.diffScope,
+                  );
+                }
+              }
+              updateActiveSessionTabs((s) => ({
+                ...s,
+                splitTabId: id,
+                splitDirection: direction,
+              }));
+            }}
+            onUnsplit={() =>
+              updateActiveSessionTabs((s) => ({
+                ...s,
+                splitTabId: null,
+              }))
+            }
+            onCopyText={(txt, label) => {
+              void window.ide2.copyToClipboard(txt);
+              showToast(label);
+            }}
+            onSelectInProject={(fp) => {
+              setLeftTool("project");
+              setProjectLocateReq({ filePath: fp, seq: Date.now() });
+            }}
+            onToggleDiffForTab={(t) => {
+              if (t.viewKind === "diff") {
+                void openFileInWorktree(activeWorktreePath, t.filePath, {
+                  viewKind: "code",
+                });
+              } else {
+                void openFileInWorktree(activeWorktreePath, t.filePath, {
+                  viewKind: "diff",
+                  diffScope: currentSession.diffScope,
+                });
+              }
+            }}
+            onRevealInOs={(absPath) => void window.ide2.revealInOs(absPath)}
+            onDismiss={() => setTabContextMenu(null)}
+          />
+        );
+      })()}
 
       {/* Toast Notification */}
       {toast && (
