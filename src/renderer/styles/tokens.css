@@ -1,0 +1,83 @@
+@import "@fontsource-variable/kode-mono/index.css";
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces — expect2 Retrofuture Night */
+  --paper:   #05081a; /* Deep night ground: tool windows, gutters, chrome */
+  --screen:  #0a0f2c; /* Active code, diff & markdown viewport ground */
+  --wash:    #0c1230; /* Elevated cards, inline annotation boxes, popups */
+  --wash-hi: #111943; /* Hovered row / current cursor line highlight */
+
+  /* Ink & Rules */
+  --ink:     #f4f6ff; /* Primary text, active borders, reverse-video fill */
+  --dim:     #93a3de; /* Secondary labels, line numbers, file metadata */
+  --faint:   #27326b; /* 1px / 2px structural borders, tree guides, HUD corners */
+  --off:     #56659e; /* Comments, ignored/untracked dim paths, disabled items */
+  --knock:   #05081a; /* Text knocked out on reverse-video (--ink) surfaces */
+  --sky:     #3d6bff; /* Focus ring, active tab rule, jump target pulse */
+
+  /* Sacred Semantic Tokens (Git & Annotations ONLY — never used for syntax) */
+  --safe:    #6dffa6; /* Git added (+), [KEEP] annotation, clean branch badge */
+  --unsafe:  #ff5d4d; /* Git deleted (-), conflict, [BUG] annotation */
+  --unknown: #ffe45c; /* Git modified (~), [CHANGE]/[QUESTION] annotation, live pulse */
+
+  /* Semantic Tinted Surfaces */
+  --safe-bg:      rgba(109, 255, 166, 0.08);
+  --safe-bg-hi:   rgba(109, 255, 166, 0.20);
+  --unsafe-bg:    rgba(255, 93, 77, 0.09);
+  --unsafe-bg-hi: rgba(255, 93, 77, 0.22);
+  --unknown-bg:   rgba(255, 228, 92, 0.08);
+  --unknown-bg-hi:rgba(255, 228, 92, 0.20);
+  --sky-bg:       rgba(61, 107, 255, 0.14);
+  --sky-bg-hi:    rgba(61, 107, 255, 0.28);
+
+  /* Restrained Tonal Syntax Ramp (Cold Indigo / Ice Monochrome) */
+  --syn-id:      #f4f6ff; /* Identifiers, properties, parameters */
+  --syn-decl:    #ffffff; /* Function/class/type declarations (weight 600) */
+  --syn-kw:      #b4c5ff; /* Keywords, control flow, storage modifiers */
+  --syn-type:    #7ea0ff; /* Types, interfaces, namespaces, builtins */
+  --syn-lit:     #9fb0e3; /* Strings, numbers, regexes, constants */
+  --syn-comment: #56659e; /* Comments & docblocks */
+  --syn-punct:   #7c8cc4; /* Operators, brackets, delimiters */
+
+  /* Typography & Geometry */
+  --mono: 'Kode Mono Variable', 'Kode Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --p: 2px;
+  --font-size-ui: 13px;
+  --font-size-code: 13.5px;
+  --line-height-code: 1.5;
+
+  /* 1-bit Pixel Dither Masks (pure CSS, CSP-safe under default-src 'self') */
+  --m50: repeating-conic-gradient(var(--faint) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px;
+  --m25: radial-gradient(var(--faint) 0.9px, transparent 0.9px) 0 0 / 4px 4px;
+
+  /* Stepped Pixel Polygon Clip (--step) */
+  --step: polygon(
+    0 4px,
+    4px 4px,
+    4px 0,
+    calc(100% - 4px) 0,
+    calc(100% - 4px) 4px,
+    100% 4px,
+    100% calc(100% - 4px),
+    calc(100% - 4px) calc(100% - 4px),
+    calc(100% - 4px) 100%,
+    4px 100%,
+    4px calc(100% - 4px),
+    0 calc(100% - 4px)
+  );
+
+  /* Crisp Offset Shadows */
+  --shadow-popup: 4px 4px 0 var(--sky);
+  --shadow-modal: 4px 4px 0 var(--sky), 8px 8px 0 var(--safe), 12px 12px 0 var(--unknown), 16px 16px 0 var(--unsafe);
+}
+
+/* Cold-Tonal Syntax Token Classes */
+.tok-id      { color: var(--syn-id); }
+.tok-decl    { color: var(--syn-decl); font-weight: 600; }
+.tok-kw      { color: var(--syn-kw); font-weight: 500; }
+.tok-type    { color: var(--syn-type); }
+.tok-lit     { color: var(--syn-lit); }
+.tok-comment { color: var(--syn-comment); font-style: italic; }
+.tok-punct   { color: var(--syn-punct); }

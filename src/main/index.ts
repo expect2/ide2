@@ -1,0 +1,693 @@
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  shell,
+  type WebContents,
+} from "electron";
+import { realpathSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { IntelClient } from "./intel/client.js";
+import { AnnotationStore } from "./services/annotations.js";
+import { resolveRepoContext, WorktreeService } from "./services/git.js";
+import { MultiWorktreeWatcher } from "./services/watcher.js";
+import type {
+  CodeSymbol,
+  CreateAnnotationInput,
+  DiffScope,
+  ExportPromptOptions,
+  FileGitStatus,
+  FindInPathQuery,
+  LaunchContext,
+  TokenSpan,
+  UpdateAnnotationInput,
+  WorkspaceEvent,
+} from "../shared/protocol.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DIST_ROOT = resolve(__dirname, "..");
+
+interface ParsedProcessFlags {
+  cwd: string;
+  target: string;
+  diff: boolean;
+  base?: string;
+  worktree?: string;
+}
+
+function parseFlags(argv: readonly string[], fallbackCwd: string): ParsedProcessFlags {
+  let cwd = fallbackCwd;
+  let target: string | undefined;
+  let diff = false;
+  let base: string | undefined;
+  let worktree: string | undefined;
+
+  for (const arg of argv) {
+    if (arg.startsWith("--ide2-cwd=")) {
+      cwd = arg.slice("--ide2-cwd=".length);
+    } else if (arg.startsWith("--ide2-target=")) {
+      target = arg.slice("--ide2-target=".length);
+    } else if (arg === "--ide2-diff=1") {
+      diff = true;
+    } else if (arg.startsWith("--ide2-base=")) {
+      base = arg.slice("--ide2-base=".length);
+    } else if (arg.startsWith("--ide2-worktree=")) {
+      worktree = arg.slice("--ide2-worktree=".length);
+    }
+  }
+
+  const resolvedTarget = target ? resolve(cwd, target) : cwd;
+  return { cwd, target: resolvedTarget, diff, base, worktree };
+}
+
+interface RepoSession {
+  context: LaunchContext;
+  git: WorktreeService;
+  annotations: AnnotationStore;
+  watcher: MultiWorktreeWatcher;
+  windows: Set<BrowserWindow>;
+  analysisCache: Map<string, { tokens: TokenSpan[][]; symbols: CodeSymbol[] }>;
+  gitStatusCache: Map<string, Map<string, FileGitStatus>>;
+}
+
+const sessionsByCommonDir = new Map<string, RepoSession>();
+const sessionByWindowId = new Map<number, { session: RepoSession; launchContext: LaunchContext }>();
+
+const intel = new IntelClient({
+  workerPath: resolve(__dirname, "worker.cjs"),
+});
+
+function broadcastToSession(session: RepoSession, event: WorkspaceEvent): void {
+  for (const win of session.windows) {
+    if (!win.isDestroyed()) {
+      win.webContents.send("ide2:event", event);
+    }
+  }
+}
+
+async function getOrCreateRepoSession(flags: ParsedProcessFlags): Promise<{
+  session: RepoSession;
+  launchContext: LaunchContext;
+}> {
+  const baseCtx = await resolveRepoContext(flags.target);
+  const existing = sessionsByCommonDir.get(baseCtx.repoCommonDir);
+
+  const selectInitialWorktree = (
+    wts: readonly { path: string; name: string; branch: string }[],
+  ): string => {
+    if (flags.worktree) {
+      const q = flags.worktree.trim();
+      const resolvedQ = resolve(flags.cwd, q);
+      let canonQ = resolvedQ;
+      try {
+        canonQ = realpathSync(resolvedQ);
+      } catch {
+        // ignore non-path names
+      }
+      const matched = wts.find(
+        (w) =>
+          w.name === q ||
+          w.branch === q ||
+          w.path === q ||
+          w.path === resolvedQ ||
+          w.path === canonQ,
+      );
+      if (matched) return matched.path;
+    }
+    return baseCtx.initialWorktreePath;
+  };
+
+  if (existing) {
+    const wts =
+      existing.git.listCachedWorktrees().length > 0
+        ? existing.git.listCachedWorktrees()
+        : await existing.git.discoverWorktrees(baseCtx.initialWorktreePath);
+    const initialWorktreePath = selectInitialWorktree(wts);
+    return {
+      session: existing,
+      launchContext: {
+        ...baseCtx,
+        initialWorktreePath,
+        initialDiffMode: flags.diff,
+        initialBaseRef: flags.base,
+      },
+    };
+  }
+
+  const git = new WorktreeService();
+  const worktrees = await git.discoverWorktrees(baseCtx.initialWorktreePath);
+  const initialWorktreePath = selectInitialWorktree(worktrees);
+  const annotations = new AnnotationStore(baseCtx.repoCommonDir);
+
+  const launchContext: LaunchContext = {
+    ...baseCtx,
+    initialWorktreePath,
+    initialDiffMode: flags.diff,
+    initialBaseRef: flags.base,
+  };
+
+  let sessionRef: RepoSession;
+  const watcher = new MultiWorktreeWatcher(
+    worktrees,
+    baseCtx.repoCommonDir,
+    async ({ worktreePath, changedFiles }) => {
+      if (!sessionRef) return;
+      sessionRef.gitStatusCache.delete(worktreePath);
+      intel.invalidateWorktree(worktreePath, changedFiles);
+      const updatedWorktrees = await git.discoverWorktrees(worktreePath);
+
+      // Reconcile annotations for any changed files so line numbers stay accurate live
+      let reconciledAny = false;
+      for (const relFile of changedFiles.slice(0, 25)) {
+        try {
+          const doc = await git.readFile(worktreePath, relFile);
+          if (!doc.isBinary) {
+            await annotations.reconcileFile(worktreePath, relFile, doc.lines, doc.contentHash);
+            reconciledAny = true;
+          }
+        } catch {
+          // File may have been deleted or ignored
+        }
+      }
+
+      broadcastToSession(sessionRef, {
+        type: "worktrees-updated",
+        worktrees: updatedWorktrees,
+        changedWorktreePath: worktreePath,
+        changedFiles,
+      });
+
+      if (reconciledAny) {
+        const list = await annotations.list();
+        broadcastToSession(sessionRef, {
+          type: "annotations-updated",
+          worktreePath,
+          annotations: list,
+        });
+      }
+    },
+    {
+      onActivity: (worktreePath, timestamp) => {
+        git.touchActivity(worktreePath, timestamp);
+      },
+    },
+  );
+
+  sessionRef = {
+    context: launchContext,
+    git,
+    annotations,
+    watcher,
+    windows: new Set(),
+    analysisCache: new Map(),
+    gitStatusCache: new Map(),
+  };
+
+  sessionsByCommonDir.set(baseCtx.repoCommonDir, sessionRef);
+  return { session: sessionRef, launchContext };
+}
+
+function getWindowSession(sender: WebContents): { session: RepoSession; launchContext: LaunchContext } {
+  const win = BrowserWindow.fromWebContents(sender);
+  if (!win) {
+    throw new Error("Request did not originate from an active ide2 window.");
+  }
+  const entry = sessionByWindowId.get(win.id);
+  if (!entry) {
+    throw new Error("No repository session bound to window.");
+  }
+  return entry;
+}
+
+function installNativeShortcutRouter(win: BrowserWindow): void {
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    const isMac = process.platform === "darwin";
+    const mod = isMac ? input.meta : input.control;
+    const key = input.key.toLowerCase();
+
+    // Never allow Cmd/Ctrl+W or Cmd/Ctrl+R or Cmd/Ctrl+N to trigger Chromium browser defaults!
+    if (mod && !input.alt && !input.shift && key === "w") {
+      event.preventDefault();
+      win.webContents.send("ide2:event", {
+        type: "native-shortcut",
+        action: "close-tab",
+      } satisfies WorkspaceEvent);
+      return;
+    }
+
+    if (mod && (key === "r" || key === "p" || key === "n")) {
+      // Prevent accidental Chromium reload, print dialog, or new window; forward Cmd+Shift+P to Markdown toggle
+      if (input.shift && key === "p") {
+        event.preventDefault();
+        win.webContents.send("ide2:event", {
+          type: "native-shortcut",
+          action: "cycle-markdown-mode",
+        } satisfies WorkspaceEvent);
+      } else if (!input.shift) {
+        event.preventDefault();
+      }
+    }
+  });
+}
+
+function assertRegisteredWorktree(session: RepoSession, worktreePath: string): string {
+  let canon = worktreePath;
+  try {
+    canon = realpathSync(worktreePath);
+  } catch {
+    // will fail membership check below
+  }
+  const known = session.git.listCachedWorktrees().some((w) => w.path === canon);
+  if (!known) {
+    throw new Error(`Refused access to unregistered worktree path: ${worktreePath}`);
+  }
+  return canon;
+}
+
+function buildAppMenu(): void {
+  const isMac = process.platform === "darwin";
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? ([
+          {
+            label: "expect2 IDE",
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ] as Electron.MenuItemConstructorOptions[])
+      : []),
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+        { role: "toggleDevTools" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> {
+  const { session, launchContext } = await getOrCreateRepoSession(flags);
+
+  // Warm-window reuse if this repository already has an open window!
+  const existingWin = Array.from(session.windows).find((w) => !w.isDestroyed());
+  if (existingWin) {
+    if (existingWin.isMinimized()) existingWin.restore();
+    existingWin.focus();
+    existingWin.webContents.send("ide2:event", {
+      type: "cli-open-target",
+      worktreePath: launchContext.initialWorktreePath,
+      filePath: launchContext.initialFilePath,
+      line: launchContext.initialLine,
+      column: launchContext.initialColumn,
+      diffMode: launchContext.initialDiffMode,
+    } satisfies WorkspaceEvent);
+    return existingWin;
+  }
+
+  const win = new BrowserWindow({
+    width: 1480,
+    height: 940,
+    minWidth: 920,
+    minHeight: 600,
+    backgroundColor: "#05081a",
+    darkTheme: true,
+    autoHideMenuBar: process.platform !== "darwin",
+    title: `expect2 IDE — ${launchContext.repoName}`,
+    show: !process.env.IDE2_SMOKE_SCREENSHOT,
+    webPreferences: {
+      preload: resolve(DIST_ROOT, "preload/index.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    },
+  });
+
+  session.windows.add(win);
+  sessionByWindowId.set(win.id, { session, launchContext });
+  installNativeShortcutRouter(win);
+
+  win.on("closed", () => {
+    session.windows.delete(win);
+    sessionByWindowId.delete(win.id);
+    if (session.windows.size === 0) {
+      session.watcher.close();
+      sessionsByCommonDir.delete(session.context.repoCommonDir);
+    }
+  });
+
+  const htmlPath = resolve(DIST_ROOT, "renderer/index.html");
+  await win.loadFile(htmlPath);
+
+  if (process.env.IDE2_SMOKE_SCREENSHOT) {
+    const outPath = process.env.IDE2_SMOKE_SCREENSHOT;
+    setTimeout(async () => {
+      try {
+        const image = await win.webContents.capturePage();
+        writeFileSync(outPath, image.toPNG());
+      } finally {
+        app.quit();
+      }
+    }, 1400);
+  }
+
+  return win;
+}
+
+function registerIpcHandlers(): void {
+  ipcMain.handle("ide2:getBootstrap", async (evt) => {
+    const { session, launchContext } = getWindowSession(evt.sender);
+    const cachedWts = session.git.listCachedWorktrees();
+    const [worktrees, annotations] = await Promise.all([
+      cachedWts.length > 0
+        ? Promise.resolve(cachedWts)
+        : session.git.discoverWorktrees(launchContext.initialWorktreePath),
+      session.annotations.list(),
+    ]);
+    return {
+      context: launchContext,
+      worktrees,
+      annotations,
+    };
+  });
+
+  ipcMain.handle("ide2:listFiles", async (evt, worktreePath: string) => {
+    const { session } = getWindowSession(evt.sender);
+    const safeWt = assertRegisteredWorktree(session, worktreePath);
+    const files = await session.git.listFiles(safeWt);
+    const statusMap = new Map(
+      files.filter((f) => f.gitStatus).map((f) => [f.path, f.gitStatus!]),
+    );
+    session.gitStatusCache.set(safeWt, statusMap);
+    return files;
+  });
+
+  ipcMain.handle(
+    "ide2:fuzzyFindFiles",
+    async (
+      evt,
+      params: { worktreePath: string; query: string; allWorktrees?: boolean; limit?: number },
+    ) => {
+      const { session } = getWindowSession(evt.sender);
+      const wts = session.git.listCachedWorktrees();
+      const targetWts = params.allWorktrees
+        ? wts
+        : wts.filter((w) => w.path === params.worktreePath);
+      const worktreesMeta = await Promise.all(
+        targetWts.map(async (wt) => {
+          let gitStatuses = session.gitStatusCache.get(wt.path);
+          if (!gitStatuses) {
+            const files = await session.git.listFiles(wt.path);
+            gitStatuses = new Map(
+              files.filter((f) => f.gitStatus).map((f) => [f.path, f.gitStatus!]),
+            );
+            session.gitStatusCache.set(wt.path, gitStatuses);
+          }
+          return { path: wt.path, name: wt.name, gitStatuses };
+        }),
+      );
+      return intel.fuzzyFindFiles({
+        ...params,
+        worktrees: worktreesMeta,
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:readFile",
+    async (evt, worktreePath: string, filePath: string, diffScope?: DiffScope) => {
+      const { session } = getWindowSession(evt.sender);
+      const safeWt = assertRegisteredWorktree(session, worktreePath);
+      const doc = await session.git.readFile(safeWt, filePath, diffScope);
+      if (doc.isBinary) return doc;
+
+      const cacheKey = `${doc.language}:${doc.contentHash}`;
+      const cached = session.analysisCache.get(cacheKey);
+      if (cached) {
+        return { ...doc, tokens: cached.tokens };
+      }
+
+      // Stream background Shiki + Tree-sitter analysis without blocking raw file paint!
+      const rawContent = doc.lines.join("\n");
+      void intel
+        .analyzeFile(worktreePath, filePath, doc.contentHash, rawContent, doc.language)
+        .then((analyzed) => {
+          if (session.analysisCache.size > 150) {
+            const firstKey = session.analysisCache.keys().next().value;
+            if (firstKey) session.analysisCache.delete(firstKey);
+          }
+          session.analysisCache.set(cacheKey, {
+            tokens: analyzed.tokens,
+            symbols: analyzed.symbols,
+          });
+          broadcastToSession(session, {
+            type: "tokens-ready",
+            worktreePath,
+            filePath,
+            contentHash: doc.contentHash,
+            tokens: analyzed.tokens,
+            symbols: analyzed.symbols,
+          });
+        })
+        .catch(() => {
+          // Non-fatal highlight/AST error
+        });
+
+      return doc;
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:readAssetDataUrl",
+    async (evt, worktreePath: string, relativeFromFile: string, rawHref: string) => {
+      const { session } = getWindowSession(evt.sender);
+      return session.git.readAssetDataUrl(worktreePath, relativeFromFile, rawHref);
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:getDiff",
+    async (evt, worktreePath: string, filePath: string, scope: DiffScope) => {
+      const { session } = getWindowSession(evt.sender);
+      return session.git.getDiff(worktreePath, filePath, scope);
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:listChangedFiles",
+    async (evt, worktreePath: string, scope: DiffScope) => {
+      const { session } = getWindowSession(evt.sender);
+      return session.git.listChangedFiles(worktreePath, scope);
+    },
+  );
+
+  ipcMain.handle("ide2:listCommits", async (evt, worktreePath: string, limit?: number) => {
+    const { session } = getWindowSession(evt.sender);
+    return session.git.listCommits(worktreePath, limit);
+  });
+
+  ipcMain.handle("ide2:getBlame", async (evt, worktreePath: string, filePath: string) => {
+    const { session } = getWindowSession(evt.sender);
+    return session.git.getBlame(worktreePath, filePath);
+  });
+
+  ipcMain.handle("ide2:getStructure", async (evt, worktreePath: string, filePath: string) => {
+    const { session } = getWindowSession(evt.sender);
+    const doc = await session.git.readFile(worktreePath, filePath);
+    if (doc.isBinary) return [];
+    const cacheKey = `${doc.language}:${doc.contentHash}`;
+    const cached = session.analysisCache.get(cacheKey);
+    if (cached) return cached.symbols;
+    return intel.getStructure(worktreePath, filePath, doc.lines.join("\n"));
+  });
+
+  ipcMain.handle(
+    "ide2:searchSymbols",
+    async (
+      evt,
+      params: { worktreePath: string; query: string; allWorktrees?: boolean; limit?: number },
+    ) => {
+      const { session } = getWindowSession(evt.sender);
+      const worktreePaths = session.git.listCachedWorktrees().map((w) => w.path);
+      return intel.searchSymbols({ ...params, worktreePaths });
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:findDefinitionAndUsages",
+    async (
+      evt,
+      params: { worktreePath: string; filePath: string; symbolName: string; line: number },
+    ) => {
+      return intel.findDefinitionAndUsages(params);
+    },
+  );
+
+  ipcMain.handle("ide2:findInPath", async (evt, query: FindInPathQuery) => {
+    const { session } = getWindowSession(evt.sender);
+    const wts = session.git.listCachedWorktrees().map((w) => ({ path: w.path, name: w.name }));
+    return intel.findInPath(query, wts);
+  });
+
+  ipcMain.handle("ide2:listAnnotations", async (evt, worktreePath?: string) => {
+    const { session } = getWindowSession(evt.sender);
+    return session.annotations.list(worktreePath);
+  });
+
+  ipcMain.handle("ide2:createAnnotation", async (evt, input: CreateAnnotationInput) => {
+    const { session } = getWindowSession(evt.sender);
+    const created = await session.annotations.create(input);
+    const all = await session.annotations.list();
+    broadcastToSession(session, {
+      type: "annotations-updated",
+      worktreePath: created.worktreePath,
+      annotations: all,
+    });
+    return created;
+  });
+
+  ipcMain.handle("ide2:updateAnnotation", async (evt, input: UpdateAnnotationInput) => {
+    const { session } = getWindowSession(evt.sender);
+    const updated = await session.annotations.update(input);
+    const all = await session.annotations.list();
+    broadcastToSession(session, {
+      type: "annotations-updated",
+      worktreePath: updated.worktreePath,
+      annotations: all,
+    });
+    return updated;
+  });
+
+  ipcMain.handle("ide2:deleteAnnotation", async (evt, id: string) => {
+    const { session } = getWindowSession(evt.sender);
+    await session.annotations.delete(id);
+    const all = await session.annotations.list();
+    broadcastToSession(session, {
+      type: "annotations-updated",
+      worktreePath: session.context.initialWorktreePath,
+      annotations: all,
+    });
+  });
+
+  ipcMain.handle("ide2:compileFeedbackPrompt", async (evt, options: ExportPromptOptions) => {
+    const { session } = getWindowSession(evt.sender);
+    const wts = await session.git.discoverWorktrees(options.worktreePath);
+    const wt = wts.find((w) => w.path === options.worktreePath) ?? wts[0];
+    if (!wt) {
+      return { markdown: "", count: 0 };
+    }
+    const res = await session.annotations.compilePrompt(wt, options);
+    if (options.resolveAfterExport && res.count > 0) {
+      const all = await session.annotations.list();
+      broadcastToSession(session, {
+        type: "annotations-updated",
+        worktreePath: wt.path,
+        annotations: all,
+      });
+    }
+    return res;
+  });
+
+  ipcMain.handle("ide2:copyToClipboard", (_evt, text: string) => {
+    clipboard.writeText(text);
+  });
+
+  ipcMain.handle("ide2:openExternalUrl", async (_evt, url: string) => {
+    if (/^https?:\/\//i.test(url)) {
+      await shell.openExternal(url);
+    }
+  });
+
+  ipcMain.handle("ide2:revealInOs", (_evt, targetPath: string) => {
+    shell.showItemInFolder(targetPath);
+  });
+
+  ipcMain.handle(
+    "ide2:createWorktree",
+    async (
+      evt,
+      params: { baseWorktreePath: string; branchName: string; baseRef?: string; targetDir?: string },
+    ) => {
+      const { session } = getWindowSession(evt.sender);
+      const created = await session.git.createWorktree(params);
+      const updatedWorktrees = await session.git.discoverWorktrees(created.path);
+      session.watcher.resetWatches(updatedWorktrees, session.context.repoCommonDir);
+      broadcastToSession(session, {
+        type: "worktrees-updated",
+        worktrees: updatedWorktrees,
+        changedWorktreePath: created.path,
+      });
+      return created;
+    },
+  );
+}
+
+nativeTheme.themeSource = "dark";
+
+const gotSingleInstanceLock = process.env.IDE2_SMOKE_SCREENSHOT
+  ? true
+  : app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, commandLine, workingDirectory) => {
+    const flags = parseFlags(commandLine, workingDirectory || process.cwd());
+    void openIdeWindow(flags);
+  });
+
+  app.whenReady().then(async () => {
+    buildAppMenu();
+    registerIpcHandlers();
+    const initialFlags = parseFlags(process.argv, process.cwd());
+    try {
+      await openIdeWindow(initialFlags);
+    } catch (err) {
+      console.error("Failed to open repository in ide2:", err);
+      app.quit();
+    }
+  });
+
+  app.on("window-all-closed", () => {
+    void intel.dispose().finally(() => {
+      app.quit();
+    });
+  });
+}
