@@ -71,6 +71,8 @@ describe("Agent-Driven Codebase Walkthrough (`ide2 tour`)", () => {
       autoLaunch: false,
     });
     expect(promptOut).toContain("ide2 tour --help");
+    expect(promptOut).toContain("Prepare the full walkthrough in advance");
+    expect(promptOut).toContain("update your remaining walkthrough plan");
     expect(promptOut).toContain("ide2 tour step");
 
     const skillDir = join(tmp, "custom-skill");
