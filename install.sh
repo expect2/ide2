@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # expect2 IDE (ide2) — Cross-platform installer (macOS, Linux, Windows Git Bash / WSL)
 # Usage:
-#   ./install.sh                  # Install from local checkout (if run inside repo) or clone
+#   curl -fsSL https://raw.githubusercontent.com/expect2/ide2/main/install.sh | bash
+#   ./install.sh                  # Install from local checkout (if run inside repo)
 #   IDE2_BIN_DIR=~/.local/bin ./install.sh
 
 set -euo pipefail

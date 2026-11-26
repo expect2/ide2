@@ -69,9 +69,23 @@ Works on **macOS**, **Linux**, and **Windows** (Git Bash / WSL).
 ### Prerequisites
 
 - [Git](https://git-scm.com/)
-- [Bun](https://bun.sh/) (installed automatically by `install.sh` if missing) and/or [Node.js](https://nodejs.org/)
+- [Bun](https://bun.sh/) (installed automatically by the installer if missing) and/or [Node.js](https://nodejs.org/)
 
-### Install from source
+### Quick install (no manual clone needed)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/expect2/ide2/main/install.sh | bash
+```
+
+This installs `ide2` into `~/.expect2-ide/app`, builds it, and adds the `ide2` command to your `PATH` (typically `~/.local/bin/ide2`). Run the same command again any time to update to the latest version.
+
+To install the binary to a custom directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/expect2/ide2/main/install.sh | IDE2_BIN_DIR=~/.local/bin bash
+```
+
+### Install from a local clone
 
 ```bash
 git clone https://github.com/expect2/ide2.git
@@ -79,11 +93,13 @@ cd ide2
 ./install.sh
 ```
 
-`install.sh` installs dependencies, builds the app, and installs the `ide2` command onto your `PATH` (typically `~/.local/bin/ide2`). To choose a specific directory:
+### Uninstall
 
 ```bash
-IDE2_BIN_DIR=~/.local/bin ./install.sh
+rm -rf ~/.expect2-ide/app "$(command -v ide2)"
 ```
+
+*(Your saved annotations in `~/.expect2-ide/workspaces/` are kept unless you remove `~/.expect2-ide`.)*
 
 ---
 
