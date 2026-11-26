@@ -1,32 +1,32 @@
 import React from "react";
 
-// Exact 43x10 pixel-art wordmark from expect2-site (retrofuture-site branch, src/cells.js & build.mjs):
-// lowercase `expect` + knocked-out cursor-`2` block at col 36, with optional 4-colour stepped echo trail.
+// Exact retrofuture pixel-art wordmark grammar from expect2-site (`src/cells.js` & `build.mjs`):
+// lowercase `ide` + knocked-out cursor-`2` block at col 16, with optional 4-colour stepped echo trail.
 const PX: Record<string, [number, string[]]> = {
+  i: [1, [".#.", "...", "##.", ".#.", ".#.", ".#.", "###"]],
+  d: [1, ["....#", "....#", ".####", "#...#", "#...#", "#...#", ".####"]],
   e: [3, [".###.", "#...#", "#####", "#....", ".####"]],
-  x: [3, ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"]],
-  p: [3, ["####.", "#...#", "#...#", "#...#", "####.", "#....", "#...."]],
-  c: [3, [".####", "#....", "#....", "#....", ".####"]],
-  t: [1, [".#...", ".#...", "#####", ".#...", ".#...", ".#...", ".####"]],
   "2": [1, [".###.", "#...#", "....#", "...#.", "..#..", ".#...", "#####"]],
 };
 
-const BLOCK_AT = 36;
-const LOGO_W = 43;
+const BLOCK_AT = 16;
+const LOGO_W = 23;
 const LOGO_H = 10;
 
 function buildBitmapPaths(markOnly: boolean): { lettersPath: string; blockPath: string; width: number; height: number } {
   const g: number[][] = Array.from({ length: LOGO_H }, () => Array(LOGO_W).fill(0));
-  [..."expect"].forEach((ch, i) => {
+  let colOffset = 0;
+  for (const ch of [..."ide"]) {
     const entry = PX[ch];
-    if (!entry) return;
+    if (!entry) continue;
     const [top, rows] = entry;
     rows.forEach((line, r) => {
       [...line].forEach((v, c) => {
-        if (v === "#") g[top + r]![i * 6 + c] = 1;
+        if (v === "#") g[top + r]![colOffset + c] = 1;
       });
     });
-  });
+    colOffset += (rows[0]?.length ?? 5) + 1;
+  }
   for (let r = 0; r < LOGO_H; r += 1) {
     for (let c = BLOCK_AT; c < LOGO_W; c += 1) {
       g[r]![c] = 2;
@@ -71,14 +71,15 @@ function buildBitmapPaths(markOnly: boolean): { lettersPath: string; blockPath: 
 const FULL_WORDMARK = buildBitmapPaths(false);
 const BARE_MARK = buildBitmapPaths(true);
 
-export const Expect2Wordmark: React.FC<{
+export const Ide2Wordmark: React.FC<{
   height?: number;
   withTrail?: boolean;
   className?: string;
 }> = ({ height = 18, withTrail = true, className }) => {
-  const vw = withTrail ? 470 : FULL_WORDMARK.width;
-  const vh = withTrail ? 140 : FULL_WORDMARK.height;
+  const vw = withTrail ? FULL_WORDMARK.width + 40 : FULL_WORDMARK.width;
+  const vh = withTrail ? FULL_WORDMARK.height + 40 : FULL_WORDMARK.height;
   const width = Math.round((vw / vh) * height);
+  const bx = BLOCK_AT * 10;
 
   return (
     <svg
@@ -88,16 +89,16 @@ export const Expect2Wordmark: React.FC<{
       height={height}
       className={className}
       role="img"
-      aria-label="expect2"
+      aria-label="ide2"
       style={{ display: "block", flexShrink: 0 }}
     >
       {withTrail && (
         <>
-          <rect x="400" y="40" width="70" height="100" fill="var(--sky)" />
-          <rect x="390" y="30" width="70" height="100" fill="var(--unsafe)" />
-          <rect x="380" y="20" width="70" height="100" fill="var(--unknown)" />
-          <rect x="370" y="10" width="70" height="100" fill="var(--safe)" />
-          <rect x="360" y="0" width="70" height="100" fill="var(--paper)" />
+          <rect x={bx + 40} y="40" width="70" height="100" fill="var(--sky)" />
+          <rect x={bx + 30} y="30" width="70" height="100" fill="var(--unsafe)" />
+          <rect x={bx + 20} y="20" width="70" height="100" fill="var(--unknown)" />
+          <rect x={bx + 10} y="10" width="70" height="100" fill="var(--safe)" />
+          <rect x={bx} y="0" width="70" height="100" fill="var(--paper)" />
         </>
       )}
       <path fill="var(--ink)" d={FULL_WORDMARK.lettersPath} />
@@ -105,6 +106,8 @@ export const Expect2Wordmark: React.FC<{
     </svg>
   );
 };
+
+export const Expect2Wordmark = Ide2Wordmark;
 
 export const Expect2CursorMark: React.FC<{
   height?: number;

@@ -21,7 +21,7 @@ import type {
   WorktreeInfo,
 } from "../shared/protocol.js";
 import {
-  Expect2Wordmark,
+  Ide2Wordmark,
   IconAnnotations,
   IconDiff,
   IconExport,
@@ -1541,7 +1541,7 @@ export const App: React.FC = () => {
     return (
       <div className="ide-root">
         <div className="editor-empty">
-          <Expect2Wordmark height={34} withTrail={true} />
+          <Ide2Wordmark height={34} withTrail={true} />
           <span style={{ fontSize: "12.5px", color: "var(--dim)" }}>Loading workspace…</span>
         </div>
       </div>
@@ -2142,7 +2142,7 @@ export const App: React.FC = () => {
               </div>
             ) : (
               <div className="editor-empty">
-                <Expect2Wordmark height={42} withTrail={true} />
+                <Ide2Wordmark height={42} withTrail={true} />
                 <div style={{ fontSize: "12.5px", color: "var(--dim)" }}>
                   Read-only IDE for reviewing agent-authored code & worktrees
                 </div>

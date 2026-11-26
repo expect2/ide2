@@ -5,7 +5,7 @@ import type {
   WalkthroughState,
   WorktreeInfo,
 } from "../../shared/protocol.js";
-import { Expect2Wordmark, IconGitBranch } from "../components/BrandMark.js";
+import { Ide2Wordmark, IconGitBranch } from "../components/BrandMark.js";
 import { formatShortcut, type Platform } from "./keymap.js";
 
 export const MORPH_FRAMES = ["◻", "▣", "◼", "▣"] as const;
@@ -203,7 +203,7 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
         boxSizing: "border-box",
       }}
     >
-      {/* expect2 pixel-art wordmark with 4-colour echo trail */}
+      {/* ide2 pixel-art wordmark with 4-colour echo trail */}
       <button
         type="button"
         className="ide2-wordmark"
@@ -231,7 +231,7 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
           transition: "background 120ms ease, border-color 120ms ease",
         }}
       >
-        <Expect2Wordmark height={18} withTrail={true} />
+        <Ide2Wordmark height={18} withTrail={true} />
       </button>
 
       <div

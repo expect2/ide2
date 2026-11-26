@@ -1,4 +1,6 @@
-# ide2
+<p>
+  <img src="./assets/ide2-logo.svg" alt="ide2" height="72" />
+</p>
 
 **A fast, read-only desktop IDE built for the AI coding era.**
 
