@@ -32,6 +32,9 @@ In the agentic era, producing code is no longer the bottleneck. Coding agents wr
 ## Key Features
 
 ### Live Code Review Loop (`ide2 review`) — Zero Copy/Paste
+
+![Live Code Review Demo with Grok Build and ide2](./demos/ide2-live-review.gif)
+
 - Connect any coding agent directly to `ide2` over local authenticated IPC (automatically falls back to a filesystem mailbox inside no-network sandboxes).
 - Tell your agent to wait for your review (`ide2 review wait --diff`), or click **Agent ▾ → Copy Live Review Prompt** in the top bar (or install the unified skill once with `ide2 install-skill`).
 - While connected, `ide2` shows a live **Agent connected & waiting for review** bar and promotes **Send to Agent →** and **Approve ✓** buttons across the top bar, Annotations panel, and Export modal.
@@ -39,8 +42,11 @@ In the agentic era, producing code is no longer the bottleneck. Coding agents wr
 - Works seamlessly alongside `Copy Prompt` (`⇧⌘C`) and `ide2 --export` whenever no agent is actively connected.
 
 ### Agent-Driven Codebase Walkthroughs (`ide2 tour`)
+
+![Agent-Driven Codebase Walkthrough Demo with Grok Build and ide2](./demos/ide2-tour.gif)
+
 - Ask **any** coding agent (Claude Code, Codex, Grok Build, Pi, Aider, etc.) to walk you through a repository or feature top-down.
-- The agent drives `ide2` **one step at a time** via `ide2 tour step` — moving from architecture overview → folders → files → spotlighted line ranges or diffs — and renders rich Markdown + Mermaid explanations right inside `ide2`.
+- The agent prepares the full walkthrough up front and drives `ide2` **one step at a time** via `ide2 tour step` — moving from architecture overview → folders → files → spotlighted line ranges or diffs — and renders rich Markdown + Mermaid explanations right inside `ide2`.
 - Each step **waits synchronously** until you click **Next →** in `ide2` (or type a quick question/detour right on the callout card to steer the agent's next step!).
 - Click **Agent ▾ → Copy Walkthrough Prompt** (`⇧⌘T` / `Ctrl+Shift+T`) in the top bar, or install the unified skill once with `ide2 install-skill` (`--claude` for `~/.claude/skills/ide2`).
 
