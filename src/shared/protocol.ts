@@ -260,6 +260,21 @@ export interface LaunchContext {
   platform: "darwin" | "linux" | "win32";
 }
 
+export interface RecentProject {
+  path: string;
+  repoCommonDir: string;
+  name: string;
+  lastOpenedAt: number;
+}
+
+export interface OpenProjectResult {
+  opened: boolean;
+  reused?: boolean;
+  canceled?: boolean;
+  repoName?: string;
+  error?: string;
+}
+
 export type WorkspaceEvent =
   | {
       type: "worktrees-updated";
@@ -335,5 +350,7 @@ export interface Ide2Bridge {
   openExternalUrl(url: string): Promise<void>;
   revealInOs(targetPath: string): Promise<void>;
   createWorktree(params: { baseWorktreePath: string; branchName: string; baseRef?: string; targetDir?: string }): Promise<WorktreeInfo>;
+  openProjectWindow(targetPath?: string): Promise<OpenProjectResult>;
+  listRecentProjects(): Promise<RecentProject[]>;
   onEvent(listener: (event: WorkspaceEvent) => void): () => void;
 }

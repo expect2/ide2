@@ -13,6 +13,7 @@ import type {
   FindInPathQuery,
   LaunchContext,
   LineBlame,
+  RecentProject,
   SearchMatch,
   WorktreeInfo,
 } from "../shared/protocol.js";
@@ -22,6 +23,7 @@ import {
   IconDiff,
   IconExport,
   IconGitBranch,
+  IconNewWindow,
   IconProject,
   IconSearch,
   IconSplit,
@@ -178,6 +180,8 @@ export const App: React.FC = () => {
   const [findInPathOpen, setFindInPathOpen] = useState<boolean>(false);
   const [goToLineOpen, setGoToLineOpen] = useState<boolean>(false);
   const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState<boolean>(false);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<{
     tabId: string;
@@ -583,6 +587,46 @@ export const App: React.FC = () => {
     [activeWorktreePath, showToast],
   );
 
+  const handleOpenProjectWindow = useCallback(
+    async (targetPath?: string) => {
+      setProjectMenuOpen(false);
+      try {
+        const res = await window.ide2.openProjectWindow(targetPath);
+        if (res.canceled) return;
+        if (!res.opened) {
+          showToast(res.error ?? "Could not open project");
+          return;
+        }
+        if (res.reused) {
+          showToast(`Focused existing window for ${res.repoName ?? "project"}`);
+        } else {
+          showToast(`Opened ${res.repoName ?? "project"} in new window`);
+        }
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [showToast],
+  );
+
+  useEffect(() => {
+    if (!projectMenuOpen) return;
+    void window.ide2
+      .listRecentProjects()
+      .then((list) => setRecentProjects(list))
+      .catch(() => {});
+    const onGlobalClick = () => setProjectMenuOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setProjectMenuOpen(false);
+    };
+    window.addEventListener("click", onGlobalClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", onGlobalClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [projectMenuOpen]);
+
   const updateActiveSessionTabs = useCallback(
     (updater: (session: WorktreeSessionState) => WorktreeSessionState) => {
       if (!activeWorktreePath) return;
@@ -669,6 +713,9 @@ export const App: React.FC = () => {
           break;
         case "switch-worktree":
           setSearchPopup({ open: true, tab: "worktrees" });
+          break;
+        case "open-project-window":
+          void handleOpenProjectWindow();
           break;
         case "recent-files":
           setRecentPopupOpen((v) => !v);
@@ -842,6 +889,7 @@ export const App: React.FC = () => {
           setFindInPathOpen(false);
           setGoToLineOpen(false);
           setExportModalOpen(false);
+          setProjectMenuOpen(false);
           break;
       }
     },
@@ -853,6 +901,7 @@ export const App: React.FC = () => {
       docsCache,
       handleCloseTab,
       handleCopyPromptQuick,
+      handleOpenProjectWindow,
       handleSymbolActivate,
       openFileInWorktree,
     ],
@@ -1206,8 +1255,141 @@ export const App: React.FC = () => {
 
       {/* 2. Navigation Breadcrumb & Action Bar */}
       <div className="ide-breadcrumb">
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
-          <span style={{ color: "var(--ink)", fontWeight: 600 }}>{context.repoName}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, position: "relative" }}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              setProjectMenuOpen((v) => !v);
+            }}
+            title={`Switch or open another project in a new window (${formatShortcut("open-project-window", platform)})`}
+            style={{
+              padding: "2px 7px",
+              height: "24px",
+              color: "var(--ink)",
+              fontWeight: 600,
+              gap: "5px",
+              background: projectMenuOpen ? "var(--wash-hi)" : undefined,
+            }}
+          >
+            <IconProject size={13} />
+            <span>{context.repoName}</span>
+            <span style={{ color: "var(--dim)", fontSize: "10px" }}>▾</span>
+          </button>
+
+          {projectMenuOpen && (
+            <div
+              role="menu"
+              aria-label="Project Switcher"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                left: 0,
+                zIndex: 1200,
+                minWidth: "280px",
+                maxWidth: "380px",
+                background: "var(--wash)",
+                border: "1px solid var(--border-strong)",
+                borderRadius: "8px",
+                boxShadow: "var(--shadow-popup)",
+                padding: "4px",
+                fontFamily: "var(--ui-font)",
+                fontSize: "12.5px",
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="ide2-project-menu-item"
+                onClick={() => void handleOpenProjectWindow()}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  width: "100%",
+                  padding: "6px 8px",
+                  borderRadius: "5px",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--ink)",
+                  fontWeight: 500,
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "7px" }}>
+                  <IconNewWindow size={14} />
+                  <span>Open Project in New Window…</span>
+                </span>
+                <span className="kbd-hint">{formatShortcut("open-project-window", platform)}</span>
+              </button>
+
+              {recentProjects.length > 0 && (
+                <>
+                  <div style={{ height: "1px", background: "var(--faint)", margin: "4px 6px" }} />
+                  <div
+                    style={{
+                      padding: "3px 8px 4px",
+                      fontSize: "10.5px",
+                      fontWeight: 600,
+                      letterSpacing: "0.04em",
+                      color: "var(--dim)",
+                    }}
+                  >
+                    RECENT PROJECTS
+                  </div>
+                  {recentProjects.map((proj) => {
+                    const isCurrent = proj.repoCommonDir === context.repoCommonDir;
+                    return (
+                      <button
+                        key={proj.repoCommonDir}
+                        type="button"
+                        role="menuitem"
+                        className={`ide2-project-menu-item${isCurrent ? " is-current" : ""}`}
+                        onClick={() => void handleOpenProjectWindow(proj.path)}
+                        title={proj.path}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-start",
+                          gap: "1px",
+                          width: "100%",
+                          padding: "5px 8px",
+                          borderRadius: "5px",
+                          border: "none",
+                          background: isCurrent ? "var(--selection, #2e436e)" : "transparent",
+                          color: isCurrent ? "#ffffff" : "var(--ink)",
+                          textAlign: "left",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <span style={{ fontWeight: isCurrent ? 600 : 500, fontSize: "12px" }}>
+                          {isCurrent ? `● ${proj.name}` : proj.name}
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: "var(--mono)",
+                            fontSize: "10.5px",
+                            color: isCurrent ? "rgba(255, 255, 255, 0.72)" : "var(--dim)",
+                            maxWidth: "100%",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {proj.path}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          )}
+
           <span style={{ color: "var(--off)" }}>›</span>
           <span style={{ color: "var(--dim)" }}>{activeWorktree.name}</span>
           {activeTab && (
@@ -1498,6 +1680,8 @@ export const App: React.FC = () => {
                   <span className="kbd-hint">{formatShortcut("find-in-path", platform)}</span>
                   <span>Git & Worktrees</span>
                   <span className="kbd-hint">{formatShortcut("tool-git", platform)}</span>
+                  <span>Open Project in New Window</span>
+                  <span className="kbd-hint">{formatShortcut("open-project-window", platform)}</span>
                 </div>
               </div>
             )}

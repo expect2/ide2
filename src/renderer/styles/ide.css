@@ -253,6 +253,15 @@ select:focus-visible {
   flex-shrink: 0;
 }
 
+.ide2-project-menu-item:hover {
+  background: var(--wash-hi) !important;
+  color: #ffffff !important;
+}
+
+.ide2-project-menu-item.is-current:hover {
+  background: var(--selection) !important;
+}
+
 .ide-body {
   display: flex;
   flex: 1 1 0;

@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  dialog,
   ipcMain,
   Menu,
   nativeTheme,
@@ -14,6 +15,7 @@ import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { IntelClient } from "./intel/client.js";
 import { AnnotationStore } from "./services/annotations.js";
 import { resolveRepoContext, WorktreeService } from "./services/git.js";
+import { RecentProjectsStore } from "./services/recent-projects.js";
 import { MultiWorktreeWatcher } from "./services/watcher.js";
 import type {
   CodeSymbol,
@@ -23,6 +25,7 @@ import type {
   FileGitStatus,
   FindInPathQuery,
   LaunchContext,
+  OpenProjectResult,
   TokenSpan,
   UpdateAnnotationInput,
   WorkspaceEvent,
@@ -129,6 +132,8 @@ interface RepoSession {
 
 const sessionsByCommonDir = new Map<string, RepoSession>();
 const sessionByWindowId = new Map<number, { session: RepoSession; launchContext: LaunchContext }>();
+const recentProjects = new RecentProjectsStore();
+let openProjectDialogInFlight = false;
 
 const intel = new IntelClient({
   workerPath: resolve(DIST_ROOT, "main/worker.cjs"),
@@ -324,6 +329,22 @@ function assertRegisteredWorktree(session: RepoSession, worktreePath: string): s
 
 function buildAppMenu(): void {
   const isMac = process.platform === "darwin";
+  const recent = recentProjects.list();
+  const recentSubmenu: Electron.MenuItemConstructorOptions[] =
+    recent.length > 0
+      ? recent.map((proj) => ({
+          label: proj.name,
+          sublabel: proj.path,
+          click: () => {
+            void openProjectInNewWindow(
+              BrowserWindow.getFocusedWindow() ?? undefined,
+              proj.path,
+              true,
+            );
+          },
+        }))
+      : [{ label: "No Recent Projects", enabled: false }];
+
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac
       ? ([
@@ -341,6 +362,33 @@ function buildAppMenu(): void {
           },
         ] as Electron.MenuItemConstructorOptions[])
       : []),
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Open Project in New Window…",
+          accelerator: "CmdOrCtrl+Shift+N",
+          click: () => {
+            void openProjectInNewWindow(
+              BrowserWindow.getFocusedWindow() ?? undefined,
+              undefined,
+              true,
+            );
+          },
+        },
+        {
+          label: "Recent Projects",
+          submenu: recentSubmenu,
+        },
+        { type: "separator" },
+        {
+          label: "Close Window",
+          click: () => {
+            BrowserWindow.getFocusedWindow()?.close();
+          },
+        },
+      ],
+    },
     {
       label: "Edit",
       submenu: [
@@ -375,8 +423,77 @@ function buildAppMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> {
+async function openProjectInNewWindow(
+  parentWin?: BrowserWindow,
+  explicitPath?: string,
+  showErrorDialog = false,
+): Promise<OpenProjectResult> {
+  let targetPath = explicitPath?.trim();
+
+  if (!targetPath) {
+    if (openProjectDialogInFlight) {
+      return { opened: false, canceled: true };
+    }
+    openProjectDialogInFlight = true;
+    try {
+      const dialogOpts: Electron.OpenDialogOptions = {
+        title: "Open Project in New Window",
+        buttonLabel: "Open Project",
+        properties: ["openDirectory"],
+      };
+      const result = parentWin && !parentWin.isDestroyed()
+        ? await dialog.showOpenDialog(parentWin, dialogOpts)
+        : await dialog.showOpenDialog(dialogOpts);
+      if (result.canceled || result.filePaths.length === 0) {
+        return { opened: false, canceled: true };
+      }
+      targetPath = result.filePaths[0];
+    } finally {
+      openProjectDialogInFlight = false;
+    }
+  }
+
+  if (!targetPath) {
+    return { opened: false, canceled: true };
+  }
+
+  try {
+    const opened = await openIdeWindow(
+      { cwd: targetPath, target: targetPath, diff: false },
+      parentWin,
+    );
+    return {
+      opened: true,
+      reused: opened.reused,
+      repoName: opened.repoName,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Selected folder is not inside a Git repository.";
+    const friendly = message.includes("not a git repository")
+      ? `Selected folder is not a Git repository:\n${targetPath}`
+      : message;
+    if (showErrorDialog) {
+      dialog.showErrorBox("Could Not Open Project", friendly);
+    }
+    return { opened: false, error: friendly };
+  }
+}
+
+async function openIdeWindow(
+  flags: ParsedProcessFlags,
+  cascadeFromWin?: BrowserWindow,
+): Promise<{ win: BrowserWindow; reused: boolean; repoName: string }> {
   const { session, launchContext } = await getOrCreateRepoSession(flags);
+
+  recentProjects.record({
+    path: launchContext.initialWorktreePath,
+    repoCommonDir: launchContext.repoCommonDir,
+    name: launchContext.repoName,
+  });
+  buildAppMenu();
 
   // Warm-window reuse if this repository already has an open window!
   const existingWin = Array.from(session.windows).find((w) => !w.isDestroyed());
@@ -391,10 +508,22 @@ async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> 
       column: launchContext.initialColumn,
       diffMode: launchContext.initialDiffMode,
     } satisfies WorkspaceEvent);
-    return existingWin;
+    return { win: existingWin, reused: true, repoName: launchContext.repoName };
   }
 
+  const anchorWin =
+    (cascadeFromWin && !cascadeFromWin.isDestroyed() ? cascadeFromWin : undefined) ??
+    BrowserWindow.getFocusedWindow() ??
+    undefined;
+  const cascadePos = anchorWin
+    ? (() => {
+        const [x, y] = anchorWin.getPosition();
+        return { x: (x ?? 80) + 28, y: (y ?? 80) + 28 };
+      })()
+    : {};
+
   const win = new BrowserWindow({
+    ...cascadePos,
     width: 1480,
     height: 940,
     minWidth: 920,
@@ -452,7 +581,7 @@ async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> 
     }, 1600);
   }
 
-  return win;
+  return { win, reused: false, repoName: launchContext.repoName };
 }
 
 function registerIpcHandlers(): void {
@@ -737,6 +866,15 @@ function registerIpcHandlers(): void {
       return created;
     },
   );
+
+  ipcMain.handle("ide2:openProjectWindow", async (evt, targetPath?: string) => {
+    const senderWin = BrowserWindow.fromWebContents(evt.sender) ?? undefined;
+    return openProjectInNewWindow(senderWin, targetPath, false);
+  });
+
+  ipcMain.handle("ide2:listRecentProjects", () => {
+    return recentProjects.list();
+  });
 }
 
 app.setName("ide2");

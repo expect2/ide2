@@ -26,6 +26,7 @@ export type IdeAction =
   | "annotate"
   | "copy-feedback-prompt"
   | "switch-worktree"
+  | "open-project-window"
   | "close-tab"
   | "prev-tab"
   | "next-tab"
@@ -188,6 +189,12 @@ export const IDE_ACTIONS: readonly ActionDescriptor[] = [
     action: "switch-worktree",
     label: "Switch Worktree",
     description: "Quick-switch between discovered git worktrees",
+    category: "Navigation",
+  },
+  {
+    action: "open-project-window",
+    label: "Open Project in New Window…",
+    description: "Choose another Git repository to open in a new ide2 window",
     category: "Navigation",
   },
   {
@@ -411,6 +418,8 @@ export function matchShortcut(event: KeyEventLike, platform: Platform): IdeActio
         return "copy-feedback-prompt";
       case "w":
         return "switch-worktree";
+      case "n":
+        return "open-project-window";
       default:
         return null;
     }
@@ -516,6 +525,8 @@ export function formatShortcut(action: IdeAction, platform: Platform): string {
       return isMac ? "⇧⌘C" : "Ctrl+Shift+C";
     case "switch-worktree":
       return isMac ? "⇧⌘W" : "Ctrl+Shift+W";
+    case "open-project-window":
+      return isMac ? "⇧⌘N" : "Ctrl+Shift+N";
     case "close-tab":
       return isMac ? "⌘W" : "Ctrl+W";
     case "prev-tab":

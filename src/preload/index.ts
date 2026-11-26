@@ -40,6 +40,8 @@ const bridge: Ide2Bridge = {
   openExternalUrl: (url: string) => ipcRenderer.invoke("ide2:openExternalUrl", url),
   revealInOs: (targetPath: string) => ipcRenderer.invoke("ide2:revealInOs", targetPath),
   createWorktree: (params) => ipcRenderer.invoke("ide2:createWorktree", params),
+  openProjectWindow: (targetPath?: string) => ipcRenderer.invoke("ide2:openProjectWindow", targetPath),
+  listRecentProjects: () => ipcRenderer.invoke("ide2:listRecentProjects"),
   onEvent: (listener: (event: WorkspaceEvent) => void) => {
     const handler = (_evt: Electron.IpcRendererEvent, payload: WorkspaceEvent) => {
       listener(payload);

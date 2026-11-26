@@ -198,3 +198,10 @@ export const IconExport: React.FC<{ size?: number }> = ({ size = 14 }) => (
     <path d="M8 2.5v7.5M5 5.5L8 2.5l3 3M3 10.5v2c0 .55.45 1 1 1h8c.55 0 1-.45 1-1v-2" />
   </svg>
 );
+
+export const IconNewWindow: React.FC<{ size?: number }> = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+    <path d="M2 5.5h12M8 7.75v3.5M6.25 9.5h3.5" />
+  </svg>
+);
