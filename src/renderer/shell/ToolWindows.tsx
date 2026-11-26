@@ -26,14 +26,14 @@ function getStatusBadge(status?: FileGitStatus): { glyph: string; color: string;
   switch (status) {
     case "added":
     case "untracked":
-      return { glyph: "+", color: "var(--safe, #6dffa6)", label: status };
+      return { glyph: "+", color: "var(--safe)", label: status };
     case "modified":
     case "renamed":
-      return { glyph: "~", color: "var(--unknown, #ffe45c)", label: status };
+      return { glyph: "~", color: "var(--unknown)", label: status };
     case "deleted":
-      return { glyph: "-", color: "var(--unsafe, #ff5d4d)", label: status };
+      return { glyph: "-", color: "var(--unsafe)", label: status };
     case "conflicted":
-      return { glyph: "!", color: "var(--unsafe, #ff5d4d)", label: status };
+      return { glyph: "!", color: "var(--unsafe)", label: status };
     default:
       return null;
   }
@@ -43,39 +43,77 @@ const toolHeaderStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  gap: "6px",
-  padding: "4px 8px",
-  background: "var(--paper, #05081a)",
-  borderBottom: "1px solid var(--faint, #27326b)",
-  fontSize: "11px",
-  fontWeight: 700,
-  letterSpacing: "0.04em",
-  color: "var(--ink, #f4f6ff)",
+  gap: "8px",
+  height: "34px",
+  padding: "0 10px",
+  background: "var(--wash)",
+  borderBottom: "1px solid var(--faint)",
+  fontFamily: "var(--ui-font)",
+  fontSize: "12.5px",
+  fontWeight: 600,
+  color: "var(--ink)",
   flexShrink: 0,
+  boxSizing: "border-box",
+};
+
+const headerTitleGroupStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
+  minWidth: 0,
+  overflow: "hidden",
+};
+
+const headerBadgeStyle: React.CSSProperties = {
+  fontSize: "11px",
+  fontWeight: 500,
+  color: "var(--dim)",
+  background: "var(--screen)",
+  border: "1px solid var(--faint)",
+  borderRadius: "4px",
+  padding: "1px 6px",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 };
 
 const smallBtnStyle: React.CSSProperties = {
-  background: "var(--screen, #0a0f2c)",
-  border: "1px solid var(--faint, #27326b)",
-  color: "var(--ink, #f4f6ff)",
-  padding: "2px 6px",
-  fontFamily: "inherit",
-  fontSize: "11px",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "4px",
+  background: "transparent",
+  border: "1px solid var(--faint)",
+  color: "var(--dim)",
+  padding: "2px 7px",
+  height: "22px",
+  fontFamily: "var(--ui-font)",
+  fontSize: "11.5px",
+  fontWeight: 500,
   cursor: "pointer",
-  borderRadius: 0,
+  borderRadius: "5px",
+  boxSizing: "border-box",
+};
+
+const activeSmallBtnStyle: React.CSSProperties = {
+  ...smallBtnStyle,
+  background: "var(--selection, #2e436e)",
+  border: "1px solid rgba(61, 107, 255, 0.45)",
+  color: "#ffffff",
+  fontWeight: 600,
 };
 
 const searchInputStyle: React.CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
-  background: "var(--screen, #0a0f2c)",
-  border: "1px solid var(--faint, #27326b)",
-  color: "var(--ink, #f4f6ff)",
-  padding: "4px 6px",
-  fontFamily: "inherit",
+  background: "var(--screen)",
+  border: "1px solid var(--border-strong)",
+  color: "var(--ink)",
+  padding: "5px 8px",
+  fontFamily: "var(--ui-font)",
   fontSize: "12px",
   outline: "none",
-  borderRadius: 0,
+  borderRadius: "6px",
 };
 
 /* -------------------------------------------------------------------------- */
@@ -295,15 +333,18 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        background: "var(--paper, #05081a)",
-        color: "var(--ink, #f4f6ff)",
-        fontFamily: "var(--mono, 'Kode Mono', monospace)",
-        fontSize: "12px",
+        background: "var(--wash)",
+        color: "var(--ink)",
+        fontFamily: "var(--ui-font)",
+        fontSize: "12.5px",
       }}
     >
       <div style={toolHeaderStyle}>
-        <span>┌─ 1 PROJECT ({worktreeName})</span>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <span style={headerTitleGroupStyle}>
+          <span>Project</span>
+          <span style={headerBadgeStyle}>{worktreeName}</span>
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
           <button
             type="button"
             onClick={locateActiveFile}
@@ -320,10 +361,7 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
             type="button"
             onClick={() => setCompactFolders((v) => !v)}
             title="Toggle Compact Middle Directories"
-            style={{
-              ...smallBtnStyle,
-              background: compactFolders ? "var(--wash-hi, #111943)" : "var(--screen, #0a0f2c)",
-            }}
+            style={compactFolders ? activeSmallBtnStyle : smallBtnStyle}
           >
             ⊟
           </button>
@@ -340,7 +378,7 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
         </div>
       </div>
 
-      <div style={{ padding: "6px", borderBottom: "1px solid var(--faint, #27326b)" }}>
+      <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--faint)" }}>
         <input
           type="text"
           value={filter}
@@ -361,7 +399,7 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
         }}
       >
         {rows.length === 0 ? (
-          <div style={{ padding: "12px 10px", color: "var(--dim, #93a3de)" }}>
+          <div style={{ padding: "12px 10px", color: "var(--dim)" }}>
             No matching files.
           </div>
         ) : (
@@ -378,22 +416,44 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
                     display: "flex",
                     alignItems: "center",
                     gap: "5px",
-                    width: "100%",
+                    width: "calc(100% - 8px)",
+                    margin: "1px 4px",
+                    height: "24px",
+                    borderRadius: "5px",
                     textAlign: "left",
-                    padding: "2px 8px",
+                    padding: "0 8px",
                     paddingLeft: `${8 + row.depth * 14}px`,
                     background: "transparent",
                     border: "none",
-                    color: "var(--dim, #93a3de)",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
+                    color: "var(--ink)",
+                    fontFamily: "var(--ui-font)",
+                    fontSize: "12.5px",
                     cursor: "pointer",
+                    boxSizing: "border-box",
                   }}
                 >
-                  <span style={{ width: "10px", display: "inline-block" }}>
+                  <span
+                    style={{
+                      width: "12px",
+                      display: "inline-flex",
+                      justifyContent: "center",
+                      color: "var(--dim)",
+                      fontSize: "10px",
+                      flexShrink: 0,
+                    }}
+                  >
                     {row.isExpanded ? "▾" : "▸"}
                   </span>
-                  <span style={{ fontWeight: 600 }}>{row.name}</span>
+                  <span
+                    style={{
+                      fontWeight: 500,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {row.name}
+                  </span>
                 </button>
               );
             }
@@ -419,21 +479,25 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: "6px",
-                  width: "100%",
+                  width: "calc(100% - 8px)",
+                  margin: "1px 4px",
+                  height: "24px",
+                  borderRadius: "5px",
                   textAlign: "left",
-                  padding: "2px 8px",
-                  paddingLeft: `${18 + row.depth * 14}px`,
-                  background: isSelected ? "var(--ink, #f4f6ff)" : "transparent",
+                  padding: "0 8px",
+                  paddingLeft: `${20 + row.depth * 14}px`,
+                  background: isSelected ? "var(--selection, #2e436e)" : "transparent",
                   color: isSelected
-                    ? "var(--knock, #05081a)"
+                    ? "#ffffff"
                     : badge
                       ? badge.color
-                      : "var(--ink, #f4f6ff)",
+                      : "var(--ink)",
                   border: "none",
-                  fontFamily: "inherit",
-                  fontSize: "12px",
+                  fontFamily: "var(--ui-font)",
+                  fontSize: "12.5px",
                   cursor: "pointer",
-                  fontWeight: isSelected ? 700 : 400,
+                  fontWeight: isSelected ? 500 : 400,
+                  boxSizing: "border-box",
                 }}
               >
                 <span
@@ -450,30 +514,43 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
                     style={{
                       width: "10px",
                       display: "inline-block",
-                      color: isSelected ? "var(--knock, #05081a)" : badge?.color ?? "var(--off, #56659e)",
+                      fontFamily: "var(--mono)",
+                      fontSize: "11px",
+                      color: isSelected ? "#ffffff" : badge?.color ?? "var(--off)",
+                      opacity: isSelected && !badge ? 0.4 : 1,
                       fontWeight: 700,
+                      flexShrink: 0,
                     }}
                   >
-                    {badge ? badge.glyph : " "}
+                    {badge ? badge.glyph : "·"}
                   </span>
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                     {row.name}
                   </span>
                 </span>
 
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", flexShrink: 0, fontSize: "11px" }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    flexShrink: 0,
+                    fontFamily: "var(--mono)",
+                    fontSize: "11px",
+                  }}
+                >
                   {annCount > 0 && (
-                    <span style={{ color: isSelected ? "var(--knock, #05081a)" : "var(--sky, #3d6bff)" }}>
+                    <span style={{ color: isSelected ? "#b8d0ff" : "#7fa4ff" }}>
                       ◆{annCount}
                     </span>
                   )}
                   {row.entry?.additions !== undefined && row.entry.additions > 0 && (
-                    <span style={{ color: isSelected ? "var(--knock, #05081a)" : "var(--safe, #6dffa6)" }}>
+                    <span style={{ color: isSelected ? "#a3f7c4" : "var(--safe)" }}>
                       +{row.entry.additions}
                     </span>
                   )}
                   {row.entry?.deletions !== undefined && row.entry.deletions > 0 && (
-                    <span style={{ color: isSelected ? "var(--knock, #05081a)" : "var(--unsafe, #ff5d4d)" }}>
+                    <span style={{ color: isSelected ? "#ffa096" : "var(--unsafe)" }}>
                       -{row.entry.deletions}
                     </span>
                   )}
@@ -504,21 +581,21 @@ function getSymbolBadge(kind: SymbolKind): { tag: string; color: string } {
   switch (kind) {
     case "function":
     case "method":
-      return { tag: "fn", color: "var(--syn-decl, #ffffff)" };
+      return { tag: "fn", color: "var(--syn-decl)" };
     case "class":
-      return { tag: "cls", color: "var(--syn-type, #7ea0ff)" };
+      return { tag: "cls", color: "var(--syn-type)" };
     case "interface":
-      return { tag: "ifc", color: "var(--syn-type, #7ea0ff)" };
+      return { tag: "ifc", color: "var(--syn-type)" };
     case "type":
     case "enum":
     case "module":
-      return { tag: "typ", color: "var(--syn-kw, #b4c5ff)" };
+      return { tag: "typ", color: "var(--syn-kw)" };
     case "const":
     case "variable":
     case "property":
-      return { tag: "cst", color: "var(--syn-lit, #9fb0e3)" };
+      return { tag: "cst", color: "var(--syn-lit)" };
     case "heading":
-      return { tag: "#", color: "var(--sky, #3d6bff)" };
+      return { tag: "#", color: "var(--sky)" };
   }
 }
 
@@ -597,17 +674,21 @@ export const StructureToolWindow: React.FC<StructureToolWindowProps> = ({
               alignItems: "center",
               justifyContent: "space-between",
               gap: "6px",
-              width: "100%",
+              width: "calc(100% - 8px)",
+              margin: "1px 4px",
+              height: "24px",
+              borderRadius: "5px",
               textAlign: "left",
-              padding: "3px 8px",
+              padding: "0 8px",
               paddingLeft: `${8 + depth * 14}px`,
-              background: isCurrent ? "var(--ink, #f4f6ff)" : "transparent",
-              color: isCurrent ? "var(--knock, #05081a)" : "var(--ink, #f4f6ff)",
+              background: isCurrent ? "var(--selection, #2e436e)" : "transparent",
+              color: isCurrent ? "#ffffff" : "var(--ink)",
               border: "none",
-              fontFamily: "inherit",
-              fontSize: "12px",
+              fontFamily: "var(--ui-font)",
+              fontSize: "12.5px",
               cursor: "pointer",
-              fontWeight: isCurrent ? 700 : 400,
+              fontWeight: isCurrent ? 500 : 400,
+              boxSizing: "border-box",
             }}
           >
             <span
@@ -623,14 +704,18 @@ export const StructureToolWindow: React.FC<StructureToolWindowProps> = ({
               <span
                 style={{
                   minWidth: "24px",
+                  fontFamily: "var(--mono)",
                   fontSize: "10px",
-                  fontWeight: 700,
+                  fontWeight: 600,
                   textAlign: "center",
-                  padding: "0 3px",
+                  padding: "0 4px",
+                  borderRadius: "4px",
+                  background: isCurrent ? "rgba(255, 255, 255, 0.14)" : "var(--screen)",
                   border: isCurrent
-                    ? "1px solid var(--knock, #05081a)"
-                    : "1px solid var(--faint, #27326b)",
-                  color: isCurrent ? "var(--knock, #05081a)" : badge.color,
+                    ? "1px solid rgba(255, 255, 255, 0.25)"
+                    : "1px solid var(--faint)",
+                  color: isCurrent ? "#ffffff" : badge.color,
+                  flexShrink: 0,
                 }}
               >
                 {badge.tag}
@@ -641,8 +726,9 @@ export const StructureToolWindow: React.FC<StructureToolWindowProps> = ({
             </span>
             <span
               style={{
+                fontFamily: "var(--mono)",
                 fontSize: "11px",
-                color: isCurrent ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
+                color: isCurrent ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
                 flexShrink: 0,
               }}
             >
@@ -663,14 +749,19 @@ export const StructureToolWindow: React.FC<StructureToolWindowProps> = ({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        background: "var(--paper, #05081a)",
-        color: "var(--ink, #f4f6ff)",
-        fontFamily: "var(--mono, 'Kode Mono', monospace)",
-        fontSize: "12px",
+        background: "var(--wash)",
+        color: "var(--ink)",
+        fontFamily: "var(--ui-font)",
+        fontSize: "12.5px",
       }}
     >
       <div style={toolHeaderStyle}>
-        <span>┌─ 7 STRUCTURE {filePath ? `· ${filePath.split("/").pop()}` : ""}</span>
+        <span style={headerTitleGroupStyle}>
+          <span>Structure</span>
+          {filePath && (
+            <span style={headerBadgeStyle}>{filePath.split("/").pop()}</span>
+          )}
+        </span>
         {onClose && (
           <button
             type="button"
@@ -683,7 +774,7 @@ export const StructureToolWindow: React.FC<StructureToolWindowProps> = ({
         )}
       </div>
 
-      <div style={{ padding: "6px", borderBottom: "1px solid var(--faint, #27326b)" }}>
+      <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--faint)" }}>
         <input
           type="text"
           value={filter}
@@ -696,11 +787,11 @@ export const StructureToolWindow: React.FC<StructureToolWindowProps> = ({
 
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
         {!filePath ? (
-          <div style={{ padding: "12px 10px", color: "var(--dim, #93a3de)" }}>
+          <div style={{ padding: "12px 10px", color: "var(--dim)" }}>
             Open a file to inspect its AST structure.
           </div>
         ) : visibleSymbols.length === 0 ? (
-          <div style={{ padding: "12px 10px", color: "var(--dim, #93a3de)" }}>
+          <div style={{ padding: "12px 10px", color: "var(--dim)" }}>
             No symbols found.
           </div>
         ) : (
@@ -785,15 +876,18 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        background: "var(--paper, #05081a)",
-        color: "var(--ink, #f4f6ff)",
-        fontFamily: "var(--mono, 'Kode Mono', monospace)",
-        fontSize: "12px",
+        background: "var(--wash)",
+        color: "var(--ink)",
+        fontFamily: "var(--ui-font)",
+        fontSize: "12.5px",
       }}
     >
       <div style={toolHeaderStyle}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span>┌─ 9 GIT: {activeWorktree.name}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+          <span style={headerTitleGroupStyle}>
+            <span>Git</span>
+            <span style={headerBadgeStyle}>{activeWorktree.name}</span>
+          </span>
           <div role="tablist" style={{ display: "inline-flex", gap: "4px" }}>
             {(["changes", "worktrees", "log"] as const).map((tab) => {
               const isActive = subTab === tab;
@@ -805,10 +899,7 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                   aria-selected={isActive}
                   onClick={() => setSubTab(tab)}
                   style={{
-                    ...smallBtnStyle,
-                    background: isActive ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-                    color: isActive ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                    fontWeight: isActive ? 700 : 500,
+                    ...(isActive ? activeSmallBtnStyle : smallBtnStyle),
                     textTransform: "capitalize",
                   }}
                 >
@@ -821,7 +912,7 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
           <button
             type="button"
             onClick={() => {
@@ -835,7 +926,10 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
             }}
             style={smallBtnStyle}
           >
-            Open Diff {formatShortcut("toggle-diff", platform)}
+            <span>Open Diff</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: "10.5px", opacity: 0.8 }}>
+              {formatShortcut("toggle-diff", platform)}
+            </span>
           </button>
           {onClose && (
             <button
@@ -858,9 +952,9 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              padding: "5px 8px",
-              borderBottom: "1px solid var(--faint, #27326b)",
-              background: "var(--screen, #0a0f2c)",
+              padding: "6px 10px",
+              borderBottom: "1px solid var(--faint)",
+              background: "var(--screen)",
               gap: "8px",
             }}
           >
@@ -868,41 +962,19 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
               <button
                 type="button"
                 onClick={() => onChangeDiffScope({ kind: "branch", baseRef: activeWorktree.baseRef })}
-                style={{
-                  ...smallBtnStyle,
-                  background:
-                    diffScope.kind === "branch"
-                      ? "var(--ink, #f4f6ff)"
-                      : "var(--paper, #05081a)",
-                  color:
-                    diffScope.kind === "branch"
-                      ? "var(--knock, #05081a)"
-                      : "var(--dim, #93a3de)",
-                  fontWeight: diffScope.kind === "branch" ? 700 : 400,
-                }}
+                style={diffScope.kind === "branch" ? activeSmallBtnStyle : smallBtnStyle}
               >
                 Branch vs {activeWorktree.baseRef || "base"}
               </button>
               <button
                 type="button"
                 onClick={() => onChangeDiffScope({ kind: "working" })}
-                style={{
-                  ...smallBtnStyle,
-                  background:
-                    diffScope.kind === "working"
-                      ? "var(--ink, #f4f6ff)"
-                      : "var(--paper, #05081a)",
-                  color:
-                    diffScope.kind === "working"
-                      ? "var(--knock, #05081a)"
-                      : "var(--dim, #93a3de)",
-                  fontWeight: diffScope.kind === "working" ? 700 : 400,
-                }}
+                style={diffScope.kind === "working" ? activeSmallBtnStyle : smallBtnStyle}
               >
                 Working Tree
               </button>
             </div>
-            <span style={{ color: "var(--dim, #93a3de)", fontSize: "11px" }}>
+            <span style={{ color: "var(--dim)", fontFamily: "var(--mono)", fontSize: "11px" }}>
               {diffScope.kind === "branch"
                 ? `merge-base(${activeWorktree.baseRef}) ↔ working tree`
                 : diffScope.kind === "working"
@@ -915,12 +987,13 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
 
           <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
             {changedFiles.length === 0 ? (
-              <div style={{ padding: "12px 10px", color: "var(--safe, #6dffa6)" }}>
+              <div style={{ padding: "12px 10px", color: "var(--safe)" }}>
                 Working scope is clean — no changed files.
               </div>
             ) : (
               changedFiles.map((file) => {
                 const badge = getStatusBadge(file.status);
+                const isSelected = file.path === activeFilePath;
                 return (
                   <button
                     key={`${file.status}:${file.path}`}
@@ -931,23 +1004,26 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                       alignItems: "center",
                       justifyContent: "space-between",
                       gap: "8px",
-                      width: "100%",
+                      width: "calc(100% - 8px)",
+                      margin: "1px 4px",
+                      height: "24px",
+                      borderRadius: "5px",
                       textAlign: "left",
-                      padding: "3px 10px",
-                      background:
-                        file.path === activeFilePath ? "var(--wash-hi, #111943)" : "transparent",
+                      padding: "0 8px",
+                      background: isSelected ? "var(--selection, #2e436e)" : "transparent",
                       border: "none",
-                      color: "var(--ink, #f4f6ff)",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
+                      color: isSelected ? "#ffffff" : "var(--ink)",
+                      fontFamily: "var(--ui-font)",
+                      fontSize: "12.5px",
                       cursor: "pointer",
+                      boxSizing: "border-box",
                     }}
                   >
                     <span
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: "8px",
+                        gap: "7px",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
@@ -955,9 +1031,12 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                     >
                       <span
                         style={{
-                          color: badge?.color ?? "var(--dim, #93a3de)",
+                          fontFamily: "var(--mono)",
+                          fontSize: "11px",
+                          color: isSelected ? "#ffffff" : badge?.color ?? "var(--dim)",
                           fontWeight: 700,
                           width: "10px",
+                          flexShrink: 0,
                         }}
                       >
                         {badge?.glyph ?? "~"}
@@ -969,9 +1048,14 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                         <span
                           style={{
                             fontSize: "10px",
-                            color: "var(--dim, #93a3de)",
-                            border: "1px solid var(--faint, #27326b)",
-                            padding: "0 3px",
+                            fontWeight: 600,
+                            color: isSelected ? "#ffffff" : "var(--dim)",
+                            background: isSelected ? "rgba(255,255,255,0.16)" : "var(--screen)",
+                            border: isSelected
+                              ? "1px solid rgba(255,255,255,0.24)"
+                              : "1px solid var(--faint)",
+                            borderRadius: "4px",
+                            padding: "0 4px",
                           }}
                         >
                           STAGED
@@ -979,9 +1063,21 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                       )}
                     </span>
 
-                    <span style={{ display: "inline-flex", gap: "6px", flexShrink: 0, fontSize: "11px" }}>
-                      <span style={{ color: "var(--safe, #6dffa6)" }}>+{file.additions}</span>
-                      <span style={{ color: "var(--unsafe, #ff5d4d)" }}>-{file.deletions}</span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        gap: "6px",
+                        flexShrink: 0,
+                        fontFamily: "var(--mono)",
+                        fontSize: "11px",
+                      }}
+                    >
+                      <span style={{ color: isSelected ? "#a3f7c4" : "var(--safe)" }}>
+                        +{file.additions}
+                      </span>
+                      <span style={{ color: isSelected ? "#ffa096" : "var(--unsafe)" }}>
+                        -{file.deletions}
+                      </span>
                     </span>
                   </button>
                 );
@@ -993,7 +1089,7 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
 
       {/* Sub-tab 2: Worktrees */}
       {subTab === "worktrees" && (
-        <div style={{ flex: 1, overflow: "auto", padding: "6px 8px" }}>
+        <div style={{ flex: 1, overflow: "auto", padding: "6px 10px" }}>
           <table
             style={{
               width: "100%",
@@ -1004,8 +1100,8 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
             <thead>
               <tr
                 style={{
-                  borderBottom: "1px solid var(--faint, #27326b)",
-                  color: "var(--dim, #93a3de)",
+                  borderBottom: "1px solid var(--faint)",
+                  color: "var(--dim)",
                   textAlign: "left",
                 }}
               >
@@ -1026,37 +1122,58 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                   <tr
                     key={wt.path}
                     style={{
-                      borderBottom: "1px solid var(--faint, #27326b)",
-                      background: isCurrent ? "var(--wash-hi, #111943)" : "transparent",
+                      borderBottom: "1px solid var(--faint)",
+                      background: isCurrent ? "var(--selection, #2e436e)" : "transparent",
+                      color: isCurrent ? "#ffffff" : "var(--ink)",
                     }}
                   >
                     <td style={tdStyle}>
-                      <strong>{isCurrent ? `■ ${wt.name}` : wt.name}</strong>
+                      <span style={{ fontWeight: isCurrent ? 600 : 500 }}>
+                        {isCurrent ? `● ${wt.name}` : wt.name}
+                      </span>
                     </td>
-                    <td style={tdStyle}>
+                    <td style={{ ...tdStyle, fontFamily: "var(--mono)", fontSize: "11.5px" }}>
                       {wt.branch}
                       {wt.ahead > 0 ? ` ↑${wt.ahead}` : ""}
                       {wt.behind > 0 ? ` ↓${wt.behind}` : ""}
                     </td>
-                    <td style={{ ...tdStyle, color: "var(--dim, #93a3de)" }}>{wt.baseRef}</td>
-                    <td style={{ ...tdStyle, color: "var(--syn-type, #7ea0ff)" }}>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        fontFamily: "var(--mono)",
+                        fontSize: "11.5px",
+                        color: isCurrent ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
+                      }}
+                    >
+                      {wt.baseRef}
+                    </td>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        fontFamily: "var(--mono)",
+                        fontSize: "11.5px",
+                        color: isCurrent ? "#b8d0ff" : "var(--syn-decl)",
+                      }}
+                    >
                       {wt.headSha.slice(0, 7)}
                     </td>
-                    <td style={tdStyle}>
-                      <span style={{ color: "var(--unknown, #ffe45c)" }}>
-                        ~{wt.counts.modified}
-                      </span>{" "}
-                      <span style={{ color: "var(--safe, #6dffa6)" }}>
+                    <td style={{ ...tdStyle, fontFamily: "var(--mono)", fontSize: "11.5px" }}>
+                      <span style={{ color: "var(--unknown)" }}>~{wt.counts.modified}</span>{" "}
+                      <span style={{ color: isCurrent ? "#a3f7c4" : "var(--safe)" }}>
                         +{wt.counts.added + wt.counts.untracked}
                       </span>{" "}
-                      <span style={{ color: "var(--unsafe, #ff5d4d)" }}>
+                      <span style={{ color: isCurrent ? "#ffa096" : "var(--unsafe)" }}>
                         -{wt.counts.deleted}
                       </span>
                     </td>
                     <td
                       style={{
                         ...tdStyle,
-                        color: isLive ? "var(--unknown, #ffe45c)" : "var(--dim, #93a3de)",
+                        color: isLive
+                          ? "var(--unknown)"
+                          : isCurrent
+                            ? "rgba(255, 255, 255, 0.78)"
+                            : "var(--dim)",
                       }}
                     >
                       {isLive ? "▣ active" : formatRelativeActivity(wt.lastActivityAt, now)}
@@ -1084,7 +1201,15 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                         <button
                           type="button"
                           onClick={() => void onCopyText(`cd "${wt.path.replace(/"/g, '\\"')}"`)}
-                          style={smallBtnStyle}
+                          style={
+                            isCurrent
+                              ? {
+                                  ...smallBtnStyle,
+                                  borderColor: "rgba(255, 255, 255, 0.25)",
+                                  color: "#ffffff",
+                                }
+                              : smallBtnStyle
+                          }
                         >
                           Copy cd command
                         </button>
@@ -1105,11 +1230,12 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
             style={{
               flex: selectedCommit ? "1 1 58%" : "1 1 100%",
               overflowY: "auto",
-              borderRight: selectedCommit ? "1px solid var(--faint, #27326b)" : "none",
+              padding: "4px 0",
+              borderRight: selectedCommit ? "1px solid var(--faint)" : "none",
             }}
           >
             {commits.length === 0 ? (
-              <div style={{ padding: "12px 10px", color: "var(--dim, #93a3de)" }}>
+              <div style={{ padding: "12px 10px", color: "var(--dim)" }}>
                 No commits loaded.
               </div>
             ) : (
@@ -1125,16 +1251,18 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                       alignItems: "center",
                       justifyContent: "space-between",
                       gap: "8px",
-                      width: "100%",
+                      width: "calc(100% - 8px)",
+                      margin: "1px 4px",
+                      borderRadius: "5px",
                       textAlign: "left",
-                      padding: "4px 10px",
-                      background: isSelected ? "var(--ink, #f4f6ff)" : "transparent",
-                      color: isSelected ? "var(--knock, #05081a)" : "var(--ink, #f4f6ff)",
+                      padding: "5px 8px",
+                      background: isSelected ? "var(--selection, #2e436e)" : "transparent",
+                      color: isSelected ? "#ffffff" : "var(--ink)",
                       border: "none",
-                      borderBottom: "1px solid var(--faint, #27326b)",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
+                      fontFamily: "var(--ui-font)",
+                      fontSize: "12.5px",
                       cursor: "pointer",
+                      boxSizing: "border-box",
                     }}
                   >
                     <span
@@ -1148,8 +1276,11 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                     >
                       <span
                         style={{
-                          color: isSelected ? "var(--knock, #05081a)" : "var(--syn-type, #7ea0ff)",
-                          fontWeight: 700,
+                          fontFamily: "var(--mono)",
+                          fontSize: "11.5px",
+                          color: isSelected ? "#b8d0ff" : "var(--syn-decl)",
+                          fontWeight: 600,
+                          flexShrink: 0,
                         }}
                       >
                         {commit.shortSha}
@@ -1158,12 +1289,18 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                         <span
                           key={r}
                           style={{
+                            fontFamily: "var(--mono)",
                             fontSize: "10px",
-                            padding: "0 4px",
+                            padding: "0 5px",
+                            borderRadius: "4px",
+                            background: isSelected
+                              ? "rgba(255, 255, 255, 0.16)"
+                              : "var(--sky-bg)",
                             border: isSelected
-                              ? "1px solid var(--knock, #05081a)"
-                              : "1px solid var(--sky, #3d6bff)",
-                            color: isSelected ? "var(--knock, #05081a)" : "var(--sky, #3d6bff)",
+                              ? "1px solid rgba(255, 255, 255, 0.25)"
+                              : "1px solid rgba(61, 107, 255, 0.35)",
+                            color: isSelected ? "#ffffff" : "#8cb4ff",
+                            flexShrink: 0,
                           }}
                         >
                           {r}
@@ -1177,7 +1314,7 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                       style={{
                         flexShrink: 0,
                         fontSize: "11px",
-                        color: isSelected ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
+                        color: isSelected ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
                       }}
                     >
                       {commit.author} · {commit.relativeTime}
@@ -1195,7 +1332,7 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                 display: "flex",
                 flexDirection: "column",
                 minWidth: 0,
-                background: "var(--screen, #0a0f2c)",
+                background: "var(--screen)",
               }}
             >
               <div
@@ -1203,13 +1340,18 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  padding: "4px 8px",
-                  borderBottom: "1px solid var(--faint, #27326b)",
-                  fontSize: "11px",
+                  padding: "6px 10px",
+                  borderBottom: "1px solid var(--faint)",
+                  fontSize: "12px",
+                  color: "var(--dim)",
                 }}
               >
                 <span>
-                  Commit <strong>{selectedCommit.shortSha}</strong> changed files
+                  Commit{" "}
+                  <strong style={{ fontFamily: "var(--mono)", color: "var(--ink)" }}>
+                    {selectedCommit.shortSha}
+                  </strong>{" "}
+                  changed files
                 </span>
                 <button
                   type="button"
@@ -1221,11 +1363,11 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
               </div>
               <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
                 {loadingCommit ? (
-                  <div style={{ padding: "8px", color: "var(--dim, #93a3de)" }}>
+                  <div style={{ padding: "8px 10px", color: "var(--dim)" }}>
                     Loading commit changes...
                   </div>
                 ) : commitFiles.length === 0 ? (
-                  <div style={{ padding: "8px", color: "var(--dim, #93a3de)" }}>
+                  <div style={{ padding: "8px 10px", color: "var(--dim)" }}>
                     No file changes found in commit.
                   </div>
                 ) : (
@@ -1242,26 +1384,43 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
-                          width: "100%",
+                          width: "calc(100% - 8px)",
+                          margin: "1px 4px",
+                          height: "24px",
+                          borderRadius: "5px",
                           textAlign: "left",
-                          padding: "3px 8px",
+                          padding: "0 8px",
                           background: "transparent",
                           border: "none",
-                          color: "var(--ink, #f4f6ff)",
-                          fontFamily: "inherit",
+                          color: "var(--ink)",
+                          fontFamily: "var(--ui-font)",
                           fontSize: "12px",
                           cursor: "pointer",
+                          boxSizing: "border-box",
                         }}
                       >
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          <span style={{ color: badge?.color ?? "var(--dim, #93a3de)", marginRight: "6px" }}>
+                          <span
+                            style={{
+                              fontFamily: "var(--mono)",
+                              color: badge?.color ?? "var(--dim)",
+                              marginRight: "6px",
+                              fontWeight: 700,
+                            }}
+                          >
                             {badge?.glyph ?? "~"}
                           </span>
                           {file.path}
                         </span>
-                        <span style={{ fontSize: "11px", flexShrink: 0 }}>
-                          <span style={{ color: "var(--safe, #6dffa6)" }}>+{file.additions}</span>{" "}
-                          <span style={{ color: "var(--unsafe, #ff5d4d)" }}>-{file.deletions}</span>
+                        <span
+                          style={{
+                            fontFamily: "var(--mono)",
+                            fontSize: "11px",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <span style={{ color: "var(--safe)" }}>+{file.additions}</span>{" "}
+                          <span style={{ color: "var(--unsafe)" }}>-{file.deletions}</span>
                         </span>
                       </button>
                     );
@@ -1277,12 +1436,13 @@ export const GitToolWindow: React.FC<GitToolWindowProps> = ({
 };
 
 const thStyle: React.CSSProperties = {
-  padding: "4px 6px",
+  padding: "6px 8px",
   fontWeight: 600,
+  fontSize: "11.5px",
 };
 
 const tdStyle: React.CSSProperties = {
-  padding: "5px 6px",
+  padding: "6px 8px",
   whiteSpace: "nowrap",
 };
 
@@ -1302,11 +1462,11 @@ export interface AnnotationsToolWindowProps {
   onClose?: () => void;
 }
 
-const INTENT_COLORS: Record<AnnotationIntent, string> = {
-  bug: "var(--unsafe, #ff5d4d)",
-  change: "var(--unknown, #ffe45c)",
-  question: "var(--unknown, #ffe45c)",
-  keep: "var(--safe, #6dffa6)",
+const INTENT_STYLES: Record<AnnotationIntent, { color: string; bg: string }> = {
+  bug: { color: "var(--unsafe)", bg: "var(--unsafe-bg)" },
+  change: { color: "var(--unknown)", bg: "var(--unknown-bg)" },
+  question: { color: "var(--unknown)", bg: "var(--unknown-bg)" },
+  keep: { color: "var(--safe)", bg: "var(--safe-bg)" },
 };
 
 export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
@@ -1375,14 +1535,17 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        background: "var(--paper, #05081a)",
-        color: "var(--ink, #f4f6ff)",
-        fontFamily: "var(--mono, 'Kode Mono', monospace)",
-        fontSize: "12px",
+        background: "var(--wash)",
+        color: "var(--ink)",
+        fontFamily: "var(--ui-font)",
+        fontSize: "12.5px",
       }}
     >
       <div style={toolHeaderStyle}>
-        <span>┌─ 6 ANNOTATIONS ({worktree.name})</span>
+        <span style={headerTitleGroupStyle}>
+          <span>Annotations</span>
+          <span style={headerBadgeStyle}>{worktree.name}</span>
+        </span>
         {onClose && (
           <button
             type="button"
@@ -1398,17 +1561,17 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
       {/* Overall Worktree Instructions */}
       <div
         style={{
-          padding: "8px",
-          borderBottom: "1px solid var(--faint, #27326b)",
-          background: "var(--screen, #0a0f2c)",
+          padding: "10px",
+          borderBottom: "1px solid var(--faint)",
+          background: "var(--screen)",
           display: "flex",
           flexDirection: "column",
           gap: "6px",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ color: "var(--dim, #93a3de)", fontSize: "11px", fontWeight: 700 }}>
-            OVERALL WORKTREE INSTRUCTIONS
+          <span style={{ color: "var(--dim)", fontSize: "11.5px", fontWeight: 600 }}>
+            Overall Worktree Instructions
           </span>
           <button
             type="button"
@@ -1425,8 +1588,10 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
           placeholder="High-level guidance for the coding agent on this worktree..."
           style={{
             ...searchInputStyle,
+            background: "var(--wash)",
             resize: "vertical",
-            minHeight: "42px",
+            minHeight: "46px",
+            lineHeight: 1.45,
           }}
         />
       </div>
@@ -1437,14 +1602,15 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
           display: "flex",
           alignItems: "center",
           gap: "4px",
-          padding: "6px 8px",
-          borderBottom: "1px solid var(--faint, #27326b)",
+          padding: "7px 10px",
+          borderBottom: "1px solid var(--faint)",
+          flexWrap: "wrap",
         }}
       >
         {(["open", "outdated", "resolved", "all"] as const).map((status) => {
           const isActive = statusFilter === status;
-          const count = worktreeAnnotations.filter((a) =>
-            Boolean(a.filePath) && (status === "all" || a.status === status),
+          const count = worktreeAnnotations.filter(
+            (a) => Boolean(a.filePath) && (status === "all" || a.status === status),
           ).length;
           return (
             <button
@@ -1452,10 +1618,7 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
               type="button"
               onClick={() => setStatusFilter(status)}
               style={{
-                ...smallBtnStyle,
-                background: isActive ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-                color: isActive ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                fontWeight: isActive ? 700 : 400,
+                ...(isActive ? activeSmallBtnStyle : smallBtnStyle),
                 textTransform: "capitalize",
               }}
             >
@@ -1466,113 +1629,172 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
       </div>
 
       {/* Annotation List */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
         {filteredList.length === 0 ? (
-          <div style={{ padding: "12px 10px", color: "var(--dim, #93a3de)" }}>
+          <div style={{ padding: "12px 12px", color: "var(--dim)", lineHeight: 1.5 }}>
             No {statusFilter === "all" ? "" : statusFilter} file annotations in {worktree.name}.
             <br />
-            Press {formatShortcut("annotate", platform)} on any line to annotate.
+            Press{" "}
+            <span style={{ fontFamily: "var(--mono)", color: "var(--ink)" }}>
+              {formatShortcut("annotate", platform)}
+            </span>{" "}
+            on any line to annotate.
           </div>
         ) : (
-          filteredList.map((ann) => (
-            <div
-              key={ann.id}
-              style={{
-                padding: "6px 8px",
-                borderBottom: "1px solid var(--faint, #27326b)",
-                opacity: ann.status === "resolved" ? 0.6 : 1,
-                display: "flex",
-                flexDirection: "column",
-                gap: "4px",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
-                <button
-                  type="button"
-                  onClick={() => onJumpToAnnotation(ann)}
+          filteredList.map((ann) => {
+            const intentStyle = INTENT_STYLES[ann.intent];
+            return (
+              <div
+                key={ann.id}
+                style={{
+                  margin: "4px 8px",
+                  padding: "8px 10px",
+                  background: "var(--screen)",
+                  border: "1px solid var(--faint)",
+                  borderRadius: "6px",
+                  opacity: ann.status === "resolved" ? 0.6 : 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                }}
+              >
+                <div
                   style={{
-                    background: "transparent",
-                    border: "none",
-                    padding: 0,
-                    color: "var(--ink, #f4f6ff)",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    display: "inline-flex",
+                    display: "flex",
                     alignItems: "center",
+                    justifyContent: "space-between",
                     gap: "6px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
                   }}
                 >
-                  <span style={{ color: INTENT_COLORS[ann.intent], fontWeight: 700 }}>
-                    [{ann.intent.toUpperCase()}]
-                  </span>
-                  <span>
-                    {ann.filePath}
-                    {ann.startLine ? `:${ann.startLine}` : ""}
-                  </span>
-                </button>
-
-                <div style={{ display: "inline-flex", gap: "4px", flexShrink: 0 }}>
-                  {ann.status !== "resolved" ? (
-                    <button
-                      type="button"
-                      onClick={() => void onUpdateAnnotationStatus(ann.id, "resolved")}
-                      style={smallBtnStyle}
-                    >
-                      Resolve
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => void onUpdateAnnotationStatus(ann.id, "open")}
-                      style={smallBtnStyle}
-                    >
-                      Reopen
-                    </button>
-                  )}
                   <button
                     type="button"
-                    onClick={() => void onDeleteAnnotation(ann.id)}
-                    title="Delete annotation"
-                    style={smallBtnStyle}
+                    onClick={() => onJumpToAnnotation(ann)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      color: "var(--ink)",
+                      fontFamily: "var(--ui-font)",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    ×
+                    <span
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        color: intentStyle.color,
+                        background: intentStyle.bg,
+                        padding: "1px 5px",
+                        borderRadius: "4px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {ann.intent.toUpperCase()}
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontSize: "11.5px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {ann.filePath}
+                      {ann.startLine ? `:${ann.startLine}` : ""}
+                    </span>
                   </button>
+
+                  <div style={{ display: "inline-flex", gap: "4px", flexShrink: 0 }}>
+                    {ann.status !== "resolved" ? (
+                      <button
+                        type="button"
+                        onClick={() => void onUpdateAnnotationStatus(ann.id, "resolved")}
+                        style={smallBtnStyle}
+                      >
+                        Resolve
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void onUpdateAnnotationStatus(ann.id, "open")}
+                        style={smallBtnStyle}
+                      >
+                        Reopen
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void onDeleteAnnotation(ann.id)}
+                      title="Delete annotation"
+                      style={smallBtnStyle}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    color: "var(--dim)",
+                    fontSize: "12px",
+                    lineHeight: 1.45,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {ann.comment}
                 </div>
               </div>
-              <div style={{ color: "var(--dim, #93a3de)", fontSize: "11px", whiteSpace: "pre-wrap" }}>
-                {ann.comment}
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
       {/* Collapsible Live Prompt Preview + Copy Footer */}
       <div
         style={{
-          borderTop: "1px solid var(--faint, #27326b)",
-          background: "var(--screen, #0a0f2c)",
-          padding: "8px",
+          borderTop: "1px solid var(--faint)",
+          background: "var(--screen)",
+          padding: "10px",
           display: "flex",
           flexDirection: "column",
-          gap: "6px",
+          gap: "8px",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "8px",
+            flexWrap: "wrap",
+          }}
+        >
           <button
             type="button"
             onClick={() => setPreviewExpanded((v) => !v)}
-            style={smallBtnStyle}
+            style={previewExpanded ? activeSmallBtnStyle : smallBtnStyle}
           >
             {previewExpanded ? "▾ Hide" : "▸ Preview"} Markdown Prompt ({compiled.includedIds.length})
           </button>
 
-          <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", cursor: "pointer" }}>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              fontSize: "11.5px",
+              color: "var(--dim)",
+              cursor: "pointer",
+            }}
+          >
             <input
               type="checkbox"
               checked={resolveOnCopy}
@@ -1588,12 +1810,15 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
               margin: 0,
               maxHeight: "160px",
               overflow: "auto",
-              padding: "6px",
-              background: "var(--paper, #05081a)",
-              border: "1px solid var(--faint, #27326b)",
-              fontSize: "11px",
+              padding: "8px 10px",
+              background: "var(--paper)",
+              border: "1px solid var(--faint)",
+              borderRadius: "6px",
+              fontFamily: "var(--mono)",
+              fontSize: "11.5px",
+              lineHeight: 1.48,
               whiteSpace: "pre-wrap",
-              color: "var(--ink, #f4f6ff)",
+              color: "var(--ink)",
             }}
           >
             {compiled.markdown || "(No open annotations yet)"}
@@ -1605,20 +1830,28 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
           onClick={() => void handleCopyPrompt()}
           disabled={compiled.includedIds.length === 0}
           style={{
-            background: "var(--ink, #f4f6ff)",
-            color: "var(--knock, #05081a)",
-            border: "1px solid var(--ink, #f4f6ff)",
-            padding: "5px 10px",
-            fontFamily: "inherit",
-            fontSize: "12px",
-            fontWeight: 700,
+            background: copiedNotice ? "var(--safe)" : "var(--accent, #3574f0)",
+            color: copiedNotice ? "var(--knock)" : "#ffffff",
+            border: "none",
+            borderRadius: "6px",
+            padding: "7px 12px",
+            fontFamily: "var(--ui-font)",
+            fontSize: "12.5px",
+            fontWeight: 600,
             cursor: compiled.includedIds.length === 0 ? "not-allowed" : "pointer",
             opacity: compiled.includedIds.length === 0 ? 0.45 : 1,
           }}
         >
-          {copiedNotice
-            ? "Copied Feedback Prompt!"
-            : `Copy Feedback Prompt (${formatShortcut("copy-feedback-prompt", platform)})`}
+          {copiedNotice ? (
+            "Copied Feedback Prompt!"
+          ) : (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+              <span>Copy Feedback Prompt</span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: "11px", opacity: 0.85 }}>
+                {formatShortcut("copy-feedback-prompt", platform)}
+              </span>
+            </span>
+          )}
         </button>
       </div>
     </section>
@@ -1658,44 +1891,66 @@ export const UsagesToolWindow: React.FC<UsagesToolWindowProps> = ({
 }) => {
   const defGroups = useMemo(() => groupMatchesByFile(definitions), [definitions]);
   const usageGroups = useMemo(() => groupMatchesByFile(usages), [usages]);
+  const [selectedMatchKey, setSelectedMatchKey] = useState<string | null>(null);
 
   const renderMatchButton = (match: SearchMatch, idx: number, badge?: string) => {
+    const matchKey = `${match.filePath}:${match.line}:${match.column}:${idx}`;
+    const isSelected = selectedMatchKey === matchKey;
     const before = match.lineText.slice(0, match.matchStart);
     const hit = match.lineText.slice(match.matchStart, match.matchEnd);
     const after = match.lineText.slice(match.matchEnd);
 
     return (
       <button
-        key={`${match.filePath}:${match.line}:${match.column}:${idx}`}
+        key={matchKey}
         type="button"
-        onClick={() => onJumpToMatch(match)}
+        onClick={() => {
+          setSelectedMatchKey(matchKey);
+          onJumpToMatch(match);
+        }}
         style={{
           display: "flex",
           alignItems: "center",
           gap: "8px",
-          width: "100%",
+          width: "calc(100% - 8px)",
+          margin: "1px 4px",
+          height: "24px",
+          borderRadius: "5px",
           textAlign: "left",
-          padding: "2px 10px 2px 20px",
-          background: "transparent",
+          padding: "0 10px 0 22px",
+          background: isSelected ? "var(--selection, #2e436e)" : "transparent",
           border: "none",
-          color: "var(--ink, #f4f6ff)",
-          fontFamily: "inherit",
+          color: isSelected ? "#ffffff" : "var(--ink)",
+          fontFamily: "var(--mono)",
           fontSize: "12px",
           cursor: "pointer",
           whiteSpace: "nowrap",
           overflow: "hidden",
+          boxSizing: "border-box",
         }}
       >
-        <span style={{ color: "var(--dim, #93a3de)", minWidth: "40px", flexShrink: 0 }}>
+        <span
+          style={{
+            color: isSelected ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
+            minWidth: "40px",
+            flexShrink: 0,
+            fontSize: "11px",
+          }}
+        >
           :{match.line}
         </span>
         {badge && (
           <span
             style={{
               fontSize: "10px",
-              padding: "0 3px",
-              border: "1px solid var(--sky, #3d6bff)",
-              color: "var(--sky, #3d6bff)",
+              fontWeight: 600,
+              padding: "0 5px",
+              borderRadius: "4px",
+              background: isSelected ? "rgba(255, 255, 255, 0.16)" : "var(--sky-bg)",
+              border: isSelected
+                ? "1px solid rgba(255, 255, 255, 0.25)"
+                : "1px solid rgba(61, 107, 255, 0.35)",
+              color: isSelected ? "#ffffff" : "#8cb4ff",
               flexShrink: 0,
             }}
           >
@@ -1706,9 +1961,10 @@ export const UsagesToolWindow: React.FC<UsagesToolWindowProps> = ({
           <span>{before}</span>
           <mark
             style={{
-              background: "var(--ink, #f4f6ff)",
-              color: "var(--knock, #05081a)",
-              padding: "0 1px",
+              background: isSelected ? "rgba(255, 228, 92, 0.28)" : "var(--unknown-bg-hi)",
+              color: "var(--unknown)",
+              padding: "0 2px",
+              borderRadius: "3px",
             }}
           >
             {hit}
@@ -1727,15 +1983,21 @@ export const UsagesToolWindow: React.FC<UsagesToolWindowProps> = ({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        background: "var(--paper, #05081a)",
-        color: "var(--ink, #f4f6ff)",
-        fontFamily: "var(--mono, 'Kode Mono', monospace)",
-        fontSize: "12px",
+        background: "var(--wash)",
+        color: "var(--ink)",
+        fontFamily: "var(--ui-font)",
+        fontSize: "12.5px",
       }}
     >
       <div style={toolHeaderStyle}>
-        <span>
-          ┌─ USAGES OF `{symbolName}` ({definitions.length} def, {usages.length} usage)
+        <span style={headerTitleGroupStyle}>
+          <span>Usages</span>
+          <span style={{ ...headerBadgeStyle, fontFamily: "var(--mono)", color: "var(--ink)" }}>
+            {symbolName}
+          </span>
+          <span style={{ color: "var(--dim)", fontSize: "11.5px", fontWeight: 400 }}>
+            {definitions.length} def, {usages.length} usage
+          </span>
         </span>
         {onClose && (
           <button
@@ -1749,26 +2011,47 @@ export const UsagesToolWindow: React.FC<UsagesToolWindowProps> = ({
         )}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
         {definitions.length === 0 && usages.length === 0 ? (
-          <div style={{ padding: "12px 10px", color: "var(--dim, #93a3de)" }}>
-            No definitions or usages found for `{symbolName}`.
+          <div style={{ padding: "12px 12px", color: "var(--dim)" }}>
+            No definitions or usages found for{" "}
+            <span style={{ fontFamily: "var(--mono)", color: "var(--ink)" }}>{symbolName}</span>.
           </div>
         ) : (
           <>
             {defGroups.map((grp) => (
-              <div key={`def:${grp.filePath}`} style={{ marginBottom: "4px" }}>
-                <div style={{ padding: "3px 8px", color: "var(--syn-type, #7ea0ff)", fontWeight: 700 }}>
-                  ▸ {grp.filePath} ({grp.items.length} definition{grp.items.length === 1 ? "" : "s"})
+              <div key={`def:${grp.filePath}`} style={{ marginBottom: "6px" }}>
+                <div
+                  style={{
+                    padding: "4px 10px",
+                    color: "var(--syn-decl)",
+                    fontWeight: 600,
+                    fontSize: "12px",
+                  }}
+                >
+                  ▸ {grp.filePath}{" "}
+                  <span style={{ color: "var(--dim)", fontWeight: 400 }}>
+                    ({grp.items.length} definition{grp.items.length === 1 ? "" : "s"})
+                  </span>
                 </div>
                 {grp.items.map((m, i) => renderMatchButton(m, i, "DEF"))}
               </div>
             ))}
 
             {usageGroups.map((grp) => (
-              <div key={`use:${grp.filePath}`} style={{ marginBottom: "4px" }}>
-                <div style={{ padding: "3px 8px", color: "var(--dim, #93a3de)", fontWeight: 700 }}>
-                  ▸ {grp.filePath} ({grp.items.length})
+              <div key={`use:${grp.filePath}`} style={{ marginBottom: "6px" }}>
+                <div
+                  style={{
+                    padding: "4px 10px",
+                    color: "var(--ink)",
+                    fontWeight: 600,
+                    fontSize: "12px",
+                  }}
+                >
+                  ▸ {grp.filePath}{" "}
+                  <span style={{ color: "var(--dim)", fontWeight: 400 }}>
+                    ({grp.items.length})
+                  </span>
                 </div>
                 {grp.items.map((m, i) => renderMatchButton(m, i))}
               </div>

@@ -1,83 +1,98 @@
 @import "@fontsource-variable/kode-mono/index.css";
 
+/* ============================================================================
+   expect2 IDE (ide2) — JetBrains New UI (Islands Dark) × expect2 Website Brand
+   Calm low-fatigue dark neutrals for 8-hour reading + authentic expect2 accents
+   ============================================================================ */
+
 :root {
   color-scheme: dark;
 
-  /* Surfaces — expect2 Retrofuture Night */
-  --paper:   #05081a; /* Deep night ground: tool windows, gutters, chrome */
-  --screen:  #0a0f2c; /* Active code, diff & markdown viewport ground */
-  --wash:    #0c1230; /* Elevated cards, inline annotation boxes, popups */
-  --wash-hi: #111943; /* Hovered row / current cursor line highlight */
+  /* JetBrains New UI Dark Surfaces */
+  --paper: #181a1f;         /* Main toolbar, tool stripe, status bar, outer chrome */
+  --screen: #1e1f22;        /* Primary editor & diff canvas (JetBrains New UI Dark) */
+  --wash: #24262b;          /* Tool window panels, elevated cards, inputs, headers */
+  --wash-hi: #2b2d34;       /* Row hover, current cursor line highlight */
+  --selection: #2e436e;     /* Calm JetBrains selection fill (replaces harsh white blocks) */
+  --selection-hi: #36528a;  /* Focused selection hover */
 
-  /* Ink & Rules */
-  --ink:     #f4f6ff; /* Primary text, active borders, reverse-video fill */
-  --dim:     #93a3de; /* Secondary labels, line numbers, file metadata */
-  --faint:   #27326b; /* 1px / 2px structural borders, tree guides, HUD corners */
-  --off:     #56659e; /* Comments, ignored/untracked dim paths, disabled items */
-  --knock:   #05081a; /* Text knocked out on reverse-video (--ink) surfaces */
-  --sky:     #3d6bff; /* Focus ring, active tab rule, jump target pulse */
+  /* Ink & Subtle Structural Hairlines */
+  --ink: #dfe1e5;           /* Calm high-legibility primary text (zero halation) */
+  --dim: #8b909a;           /* Secondary labels, line numbers, icons */
+  --faint: #2e3138;         /* Whisper-quiet 1px panel dividers */
+  --border-strong: #3e424c; /* Interactive control outlines & popup borders */
+  --off: #5f636c;           /* Disabled states, muted metadata */
+  --knock: #181a1f;         /* Text knocked out on bright semantic badges */
 
-  /* Sacred Semantic Tokens (Git & Annotations ONLY — never used for syntax) */
-  --safe:    #6dffa6; /* Git added (+), [KEEP] annotation, clean branch badge */
-  --unsafe:  #ff5d4d; /* Git deleted (-), conflict, [BUG] annotation */
-  --unknown: #ffe45c; /* Git modified (~), [CHANGE]/[QUESTION] annotation, live pulse */
+  /* Brand Accent (JetBrains Sky + expect2 Website Sky) */
+  --sky: #3d6bff;           /* expect2 sky focus & active tab underline */
+  --accent: #3574f0;        /* JetBrains New UI primary action blue */
+  --accent-hover: #4682f8;
 
-  /* Semantic Tinted Surfaces */
-  --safe-bg:      rgba(109, 255, 166, 0.08);
-  --safe-bg-hi:   rgba(109, 255, 166, 0.20);
-  --unsafe-bg:    rgba(255, 93, 77, 0.09);
+  /* Authentic expect2 Website Semantic Tokens (retrofuture-site) */
+  --safe: #6dffa6;          /* Git added (+), [KEEP], clean status, trail #1 */
+  --unsafe: #ff5d4d;        /* Git deleted (-), conflict, [BUG], trail #3 */
+  --unknown: #ffe45c;       /* Git modified (~), [CHANGE]/[QUESTION], pulse, trail #2 */
+
+  /* Subtle Semantic Background Washes (calm, non-glaring) */
+  --safe-bg: rgba(109, 255, 166, 0.08);
+  --safe-bg-hi: rgba(109, 255, 166, 0.18);
+  --unsafe-bg: rgba(255, 93, 77, 0.10);
   --unsafe-bg-hi: rgba(255, 93, 77, 0.22);
-  --unknown-bg:   rgba(255, 228, 92, 0.08);
-  --unknown-bg-hi:rgba(255, 228, 92, 0.20);
-  --sky-bg:       rgba(61, 107, 255, 0.14);
-  --sky-bg-hi:    rgba(61, 107, 255, 0.28);
+  --unknown-bg: rgba(255, 228, 92, 0.09);
+  --unknown-bg-hi: rgba(255, 228, 92, 0.20);
+  --sky-bg: rgba(61, 107, 255, 0.15);
+  --sky-bg-hi: rgba(61, 107, 255, 0.28);
 
-  /* Restrained Tonal Syntax Ramp (Cold Indigo / Ice Monochrome) */
-  --syn-id:      #f4f6ff; /* Identifiers, properties, parameters */
-  --syn-decl:    #ffffff; /* Function/class/type declarations (weight 600) */
-  --syn-kw:      #b4c5ff; /* Keywords, control flow, storage modifiers */
-  --syn-type:    #7ea0ff; /* Types, interfaces, namespaces, builtins */
-  --syn-lit:     #9fb0e3; /* Strings, numbers, regexes, constants */
-  --syn-comment: #56659e; /* Comments & docblocks */
-  --syn-punct:   #7c8cc4; /* Operators, brackets, delimiters */
+  /* JetBrains Islands Dark Syntax Palette (effortless long-session readability) */
+  --syn-id: #bcbec4;        /* Identifiers, properties, parameters */
+  --syn-decl: #56a8f5;      /* Function, class & method declarations */
+  --syn-kw: #cf8e6d;        /* Keywords, control flow, storage modifiers */
+  --syn-type: #c77dbb;      /* Types, interfaces, classes, builtins */
+  --syn-lit: #6aab73;       /* Strings, literals, constants */
+  --syn-comment: #7a7e85;   /* Comments & docblocks */
+  --syn-punct: #868a91;     /* Operators, brackets, delimiters */
 
-  /* Typography & Geometry */
-  --mono: 'Kode Mono Variable', 'Kode Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* Typography: Clean Sans for UI & Prose, Crisp Monospace for Code & Marks */
+  --ui-font: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "Kode Mono Variable", "Kode Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --brand-mono: "Kode Mono Variable", "Kode Mono", ui-monospace, monospace;
   --p: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
   --font-size-ui: 13px;
-  --font-size-code: 13.5px;
-  --line-height-code: 1.5;
+  --font-size-code: 13px;
+  --line-height-code: 1.56;
 
-  /* 1-bit Pixel Dither Masks (pure CSS, CSP-safe under default-src 'self') */
-  --m50: repeating-conic-gradient(var(--faint) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px;
-  --m25: radial-gradient(var(--faint) 0.9px, transparent 0.9px) 0 0 / 4px 4px;
+  /* Soft JetBrains Elevation Shadows */
+  --shadow-popup: 0 12px 32px rgba(0, 0, 0, 0.52), 0 2px 6px rgba(0, 0, 0, 0.32);
+  --shadow-modal: 0 20px 56px rgba(0, 0, 0, 0.68), 0 4px 12px rgba(0, 0, 0, 0.4);
 
-  /* Stepped Pixel Polygon Clip (--step) */
-  --step: polygon(
-    0 4px,
-    4px 4px,
-    4px 0,
-    calc(100% - 4px) 0,
-    calc(100% - 4px) 4px,
-    100% 4px,
-    100% calc(100% - 4px),
-    calc(100% - 4px) calc(100% - 4px),
-    calc(100% - 4px) 100%,
-    4px 100%,
-    4px calc(100% - 4px),
-    0 calc(100% - 4px)
+  /* Subtle texture for empty diff side */
+  --diff-hatch: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.025) 0px,
+    rgba(255, 255, 255, 0.025) 2px,
+    transparent 2px,
+    transparent 8px
   );
 
-  /* Crisp Offset Shadows */
-  --shadow-popup: 4px 4px 0 var(--sky);
-  --shadow-modal: 4px 4px 0 var(--sky), 8px 8px 0 var(--safe), 12px 12px 0 var(--unknown), 16px 16px 0 var(--unsafe);
+  /* Signature expect2 4-colour stepped brand accent bar */
+  --expect2-trail-bar: linear-gradient(
+    90deg,
+    var(--safe) 0% 25%,
+    var(--unknown) 25% 50%,
+    var(--unsafe) 50% 75%,
+    var(--sky) 75% 100%
+  );
 }
 
-/* Cold-Tonal Syntax Token Classes */
+/* Syntax Token Classes */
 .tok-id      { color: var(--syn-id); }
-.tok-decl    { color: var(--syn-decl); font-weight: 600; }
-.tok-kw      { color: var(--syn-kw); font-weight: 500; }
+.tok-decl    { color: var(--syn-decl); font-weight: 500; }
+.tok-kw      { color: var(--syn-kw); }
 .tok-type    { color: var(--syn-type); }
 .tok-lit     { color: var(--syn-lit); }
-.tok-comment { color: var(--syn-comment); font-style: italic; }
+.tok-comment { color: var(--syn-comment); }
 .tok-punct   { color: var(--syn-punct); }

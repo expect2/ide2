@@ -27,7 +27,7 @@ import {
 const backdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(5, 8, 26, 0.72)",
+  background: "rgba(10, 12, 16, 0.62)",
   display: "flex",
   alignItems: "flex-start",
   justifyContent: "center",
@@ -36,39 +36,76 @@ const backdropStyle: React.CSSProperties = {
 };
 
 const modalBoxStyle: React.CSSProperties = {
-  background: "var(--wash, #0c1230)",
-  border: "2px solid var(--ink, #f4f6ff)",
-  boxShadow: "4px 4px 0 var(--sky, #3d6bff)",
-  color: "var(--ink, #f4f6ff)",
-  fontFamily: "var(--mono, 'Kode Mono', monospace)",
-  fontSize: "12px",
+  background: "var(--wash)",
+  border: "1px solid var(--border-strong)",
+  borderRadius: "10px",
+  boxShadow: "var(--shadow-modal)",
+  overflow: "hidden",
+  color: "var(--ink)",
+  fontFamily: "var(--ui-font)",
+  fontSize: "12.5px",
   display: "flex",
   flexDirection: "column",
-  borderRadius: 0,
+};
+
+const accentTopBarStyle: React.CSSProperties = {
+  height: "2px",
+  width: "100%",
+  background: "var(--expect2-trail-bar)",
+  flexShrink: 0,
 };
 
 const modalInputStyle: React.CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
-  background: "var(--screen, #0a0f2c)",
-  border: "1px solid var(--faint, #27326b)",
-  color: "var(--ink, #f4f6ff)",
-  padding: "7px 9px",
-  fontFamily: "inherit",
+  background: "var(--screen)",
+  border: "1px solid var(--border-strong)",
+  borderRadius: "6px",
+  color: "var(--ink)",
+  padding: "7px 10px",
+  fontFamily: "var(--ui-font)",
   fontSize: "13px",
   outline: "none",
-  borderRadius: 0,
 };
 
 const pillBtnStyle: React.CSSProperties = {
-  background: "var(--screen, #0a0f2c)",
-  border: "1px solid var(--faint, #27326b)",
-  color: "var(--dim, #93a3de)",
-  padding: "2px 7px",
-  fontFamily: "inherit",
-  fontSize: "11px",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "4px",
+  background: "var(--screen)",
+  border: "1px solid var(--border-strong)",
+  color: "var(--dim)",
+  padding: "3px 8px",
+  fontFamily: "var(--ui-font)",
+  fontSize: "11.5px",
+  fontWeight: 500,
   cursor: "pointer",
-  borderRadius: 0,
+  borderRadius: "6px",
+};
+
+const activePillBtnStyle: React.CSSProperties = {
+  ...pillBtnStyle,
+  background: "var(--selection, #2e436e)",
+  border: "1px solid rgba(61, 107, 255, 0.45)",
+  color: "#ffffff",
+  fontWeight: 600,
+};
+
+const primaryCtaBtnStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "6px",
+  background: "var(--accent, #3574f0)",
+  border: "1px solid var(--accent, #3574f0)",
+  color: "#ffffff",
+  padding: "6px 14px",
+  fontFamily: "var(--ui-font)",
+  fontSize: "12px",
+  fontWeight: 600,
+  cursor: "pointer",
+  borderRadius: "6px",
 };
 
 /* -------------------------------------------------------------------------- */
@@ -410,19 +447,21 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
           maxHeight: "75vh",
         }}
       >
+        <div aria-hidden="true" style={accentTopBarStyle} />
+
         {/* Tabs + Scope Pill */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "6px 8px",
-            borderBottom: "1px solid var(--faint, #27326b)",
-            background: "var(--paper, #05081a)",
+            padding: "0 12px",
+            borderBottom: "1px solid var(--faint)",
+            background: "var(--paper)",
             gap: "8px",
           }}
         >
-          <div role="tablist" style={{ display: "inline-flex", gap: "4px" }}>
+          <div role="tablist" style={{ display: "inline-flex", gap: "2px" }}>
             {SE_TABS.map((t) => {
               const active = t.id === tab;
               return (
@@ -436,10 +475,17 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
                     setSelectedIndex(0);
                   }}
                   style={{
-                    ...pillBtnStyle,
-                    background: active ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-                    color: active ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                    fontWeight: active ? 700 : 500,
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: active
+                      ? "2px solid var(--sky)"
+                      : "2px solid transparent",
+                    color: active ? "#ffffff" : "var(--dim)",
+                    padding: "9px 10px 7px",
+                    fontFamily: "var(--ui-font)",
+                    fontSize: "12.5px",
+                    fontWeight: active ? 600 : 500,
+                    cursor: "pointer",
                   }}
                 >
                   {t.label}
@@ -452,18 +498,14 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
             type="button"
             onClick={() => setAllWorktrees((v) => !v)}
             title={`Press ${formatShortcut("go-to-file", platform)} again to toggle scope`}
-            style={{
-              ...pillBtnStyle,
-              borderColor: allWorktrees ? "var(--sky, #3d6bff)" : "var(--faint, #27326b)",
-              color: allWorktrees ? "var(--ink, #f4f6ff)" : "var(--dim, #93a3de)",
-            }}
+            style={allWorktrees ? activePillBtnStyle : pillBtnStyle}
           >
-            {allWorktrees ? "[All Worktrees]" : `[Current Worktree: ${activeWorktree.name}]`}
+            {allWorktrees ? "All Worktrees" : `Worktree: ${activeWorktree.name}`}
           </button>
         </div>
 
         {/* Search Input */}
-        <div style={{ padding: "8px", borderBottom: "1px solid var(--faint, #27326b)" }}>
+        <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--faint)" }}>
           <input
             ref={inputRef}
             type="text"
@@ -478,9 +520,9 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
         </div>
 
         {/* Results */}
-        <div style={{ flex: 1, overflowY: "auto", maxHeight: "420px" }}>
+        <div style={{ flex: 1, overflowY: "auto", maxHeight: "420px", padding: "6px 0" }}>
           {items.length === 0 ? (
-            <div style={{ padding: "14px 12px", color: "var(--dim, #93a3de)" }}>
+            <div style={{ padding: "16px 14px", color: "var(--dim)" }}>
               No matches found.
             </div>
           ) : (
@@ -497,26 +539,33 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: "10px",
-                    width: "100%",
+                    width: "calc(100% - 12px)",
+                    margin: "0 6px",
+                    borderRadius: "5px",
                     textAlign: "left",
                     padding: "6px 10px",
-                    background: selected ? "var(--ink, #f4f6ff)" : "transparent",
-                    color: selected ? "var(--knock, #05081a)" : "var(--ink, #f4f6ff)",
+                    background: selected ? "var(--selection, #2e436e)" : "transparent",
+                    color: selected ? "#ffffff" : "var(--ink)",
                     border: "none",
-                    borderBottom: "1px solid var(--faint, #27326b)",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
+                    fontFamily: "var(--ui-font)",
+                    fontSize: "12.5px",
                     cursor: "pointer",
+                    boxSizing: "border-box",
                   }}
                 >
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
                     <span
                       style={{
+                        fontFamily: "var(--mono)",
                         fontSize: "10px",
-                        padding: "0 4px",
+                        fontWeight: 600,
+                        padding: "1px 5px",
+                        borderRadius: "4px",
+                        background: selected ? "rgba(255, 255, 255, 0.14)" : "var(--screen)",
                         border: selected
-                          ? "1px solid var(--knock, #05081a)"
-                          : "1px solid var(--faint, #27326b)",
+                          ? "1px solid rgba(255, 255, 255, 0.24)"
+                          : "1px solid var(--faint)",
+                        color: selected ? "#ffffff" : "var(--dim)",
                         textTransform: "uppercase",
                         flexShrink: 0,
                       }}
@@ -525,20 +574,25 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
                     </span>
                     <span
                       style={{
-                        fontWeight: 600,
+                        fontWeight: 500,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                       }}
                     >
                       {item.title}
-                      {item.kind === "file" && item.line ? `:${item.line}` : ""}
+                      {item.kind === "file" && item.line ? (
+                        <span style={{ fontFamily: "var(--mono)", opacity: 0.85 }}>
+                          :{item.line}
+                        </span>
+                      ) : null}
                     </span>
                   </span>
 
                   <span
                     style={{
-                      color: selected ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
+                      color: selected ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
+                      fontFamily: item.kind === "action" ? "var(--mono)" : "var(--ui-font)",
                       fontSize: "11px",
                       flexShrink: 0,
                     }}
@@ -625,7 +679,7 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
       .map((w) => ({
         kind: "worktree" as const,
         key: `wt:${w.path}`,
-        label: `${w.path === activeWorktreePath ? "■ " : ""}${w.name} (${w.branch})`,
+        label: `${w.path === activeWorktreePath ? "● " : ""}${w.name} (${w.branch})`,
         worktree: w,
       }));
 
@@ -721,18 +775,24 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
           outline: "none",
         }}
       >
+        <div aria-hidden="true" style={accentTopBarStyle} />
+
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            padding: "6px 10px",
-            borderBottom: "1px solid var(--faint, #27326b)",
-            background: "var(--paper, #05081a)",
-            fontWeight: 700,
+            padding: "8px 12px",
+            borderBottom: "1px solid var(--faint)",
+            background: "var(--paper)",
           }}
         >
-          <span>SWITCHER ({formatShortcut("recent-files", platform)})</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: 600 }}>
+            <span>Switcher</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: "11px", color: "var(--dim)", fontWeight: 400 }}>
+              {formatShortcut("recent-files", platform)}
+            </span>
+          </span>
           <input
             type="text"
             value={filter}
@@ -745,7 +805,7 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
             style={{
               ...modalInputStyle,
               width: "220px",
-              padding: "2px 6px",
+              padding: "4px 8px",
               fontSize: "12px",
             }}
           />
@@ -755,12 +815,20 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
           {/* Left Column: Tool Windows + Worktrees */}
           <div
             style={{
-              borderRight: "1px solid var(--faint, #27326b)",
+              borderRight: "1px solid var(--faint)",
               overflowY: "auto",
-              padding: "4px 0",
+              padding: "6px 0",
             }}
           >
-            <div style={{ padding: "2px 10px", fontSize: "10px", color: "var(--dim, #93a3de)" }}>
+            <div
+              style={{
+                padding: "2px 12px 6px",
+                fontSize: "10.5px",
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                color: "var(--dim)",
+              }}
+            >
               TOOL WINDOWS & WORKTREES
             </div>
             {leftItems.map((item, idx) => {
@@ -782,15 +850,18 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    width: "100%",
+                    width: "calc(100% - 12px)",
+                    margin: "0 6px",
+                    borderRadius: "5px",
                     textAlign: "left",
-                    padding: "4px 10px",
-                    background: selected ? "var(--ink, #f4f6ff)" : "transparent",
-                    color: selected ? "var(--knock, #05081a)" : "var(--ink, #f4f6ff)",
+                    padding: "5px 10px",
+                    background: selected ? "var(--selection, #2e436e)" : "transparent",
+                    color: selected ? "#ffffff" : "var(--ink)",
                     border: "none",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
+                    fontFamily: "var(--ui-font)",
+                    fontSize: "12.5px",
                     cursor: "pointer",
+                    boxSizing: "border-box",
                   }}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -799,8 +870,9 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
                   {item.kind === "tool" && (
                     <span
                       style={{
+                        fontFamily: "var(--mono)",
                         fontSize: "11px",
-                        color: selected ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
+                        color: selected ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
                       }}
                     >
                       {item.shortcut}
@@ -812,12 +884,20 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
           </div>
 
           {/* Right Column: Recent Files */}
-          <div style={{ overflowY: "auto", padding: "4px 0" }}>
-            <div style={{ padding: "2px 10px", fontSize: "10px", color: "var(--dim, #93a3de)" }}>
+          <div style={{ overflowY: "auto", padding: "6px 0" }}>
+            <div
+              style={{
+                padding: "2px 12px 6px",
+                fontSize: "10.5px",
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                color: "var(--dim)",
+              }}
+            >
               RECENT FILES
             </div>
             {filteredRecent.length === 0 ? (
-              <div style={{ padding: "10px", color: "var(--dim, #93a3de)" }}>
+              <div style={{ padding: "10px 12px", color: "var(--dim)" }}>
                 No recent files yet.
               </div>
             ) : (
@@ -840,15 +920,18 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
                       alignItems: "center",
                       justifyContent: "space-between",
                       gap: "8px",
-                      width: "100%",
+                      width: "calc(100% - 12px)",
+                      margin: "0 6px",
+                      borderRadius: "5px",
                       textAlign: "left",
-                      padding: "4px 10px",
-                      background: selected ? "var(--ink, #f4f6ff)" : "transparent",
-                      color: selected ? "var(--knock, #05081a)" : "var(--ink, #f4f6ff)",
+                      padding: "5px 10px",
+                      background: selected ? "var(--selection, #2e436e)" : "transparent",
+                      color: selected ? "#ffffff" : "var(--ink)",
                       border: "none",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
+                      fontFamily: "var(--ui-font)",
+                      fontSize: "12.5px",
                       cursor: "pointer",
+                      boxSizing: "border-box",
                     }}
                   >
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -857,7 +940,7 @@ export const RecentFilesPopup: React.FC<RecentFilesPopupProps> = ({
                     <span
                       style={{
                         fontSize: "11px",
-                        color: selected ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
+                        color: selected ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
                         flexShrink: 0,
                       }}
                     >
@@ -1050,32 +1133,35 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
           height: "76vh",
         }}
       >
+        <div aria-hidden="true" style={accentTopBarStyle} />
+
         {/* Header & Search Options */}
         <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: "6px",
-            padding: "8px",
-            borderBottom: "1px solid var(--faint, #27326b)",
-            background: "var(--paper, #05081a)",
+            gap: "8px",
+            padding: "10px 12px",
+            borderBottom: "1px solid var(--faint)",
+            background: "var(--paper)",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-            <span style={{ fontWeight: 700 }}>
-              FIND IN PATH ({formatShortcut("find-in-path", platform)})
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: 600 }}>
+              <span>Find in Path</span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: "11px", color: "var(--dim)", fontWeight: 400 }}>
+                {formatShortcut("find-in-path", platform)}
+              </span>
             </span>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
               <button
                 type="button"
                 aria-pressed={caseSensitive}
                 onClick={() => setCaseSensitive((v) => !v)}
                 title="Match Case"
                 style={{
-                  ...pillBtnStyle,
-                  background: caseSensitive ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-                  color: caseSensitive ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                  fontWeight: caseSensitive ? 700 : 400,
+                  ...(caseSensitive ? activePillBtnStyle : pillBtnStyle),
+                  fontFamily: "var(--mono)",
                 }}
               >
                 Cc
@@ -1086,10 +1172,8 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
                 onClick={() => setWholeWord((v) => !v)}
                 title="Whole Words"
                 style={{
-                  ...pillBtnStyle,
-                  background: wholeWord ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-                  color: wholeWord ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                  fontWeight: wholeWord ? 700 : 400,
+                  ...(wholeWord ? activePillBtnStyle : pillBtnStyle),
+                  fontFamily: "var(--mono)",
                 }}
               >
                 W
@@ -1100,10 +1184,8 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
                 onClick={() => setIsRegex((v) => !v)}
                 title="Regular Expression"
                 style={{
-                  ...pillBtnStyle,
-                  background: isRegex ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-                  color: isRegex ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                  fontWeight: isRegex ? 700 : 400,
+                  ...(isRegex ? activePillBtnStyle : pillBtnStyle),
+                  fontFamily: "var(--mono)",
                 }}
               >
                 .*
@@ -1117,20 +1199,16 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
                 style={{
                   ...modalInputStyle,
                   width: "110px",
-                  padding: "2px 6px",
-                  fontSize: "11px",
+                  padding: "3px 8px",
+                  fontFamily: "var(--mono)",
+                  fontSize: "11.5px",
                 }}
               />
               <button
                 type="button"
                 aria-pressed={allWorktrees}
                 onClick={() => setAllWorktrees((v) => !v)}
-                style={{
-                  ...pillBtnStyle,
-                  background: allWorktrees ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-                  color: allWorktrees ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                  fontWeight: allWorktrees ? 700 : 400,
-                }}
+                style={allWorktrees ? activePillBtnStyle : pillBtnStyle}
               >
                 {allWorktrees ? "All Worktrees" : `Worktree: ${activeWorktree.name}`}
               </button>
@@ -1148,11 +1226,18 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
         </div>
 
         {/* Top: Match List */}
-        <div style={{ flex: "1 1 55%", overflowY: "auto", borderBottom: "1px solid var(--faint, #27326b)" }}>
+        <div
+          style={{
+            flex: "1 1 55%",
+            overflowY: "auto",
+            borderBottom: "1px solid var(--faint)",
+            padding: "6px 0",
+          }}
+        >
           {loading ? (
-            <div style={{ padding: "12px", color: "var(--dim, #93a3de)" }}>Searching...</div>
+            <div style={{ padding: "12px 14px", color: "var(--dim)" }}>Searching...</div>
           ) : matches.length === 0 ? (
-            <div style={{ padding: "12px", color: "var(--dim, #93a3de)" }}>
+            <div style={{ padding: "12px 14px", color: "var(--dim)" }}>
               {query.trim() ? "No matches found." : "Type to search repository files."}
             </div>
           ) : (
@@ -1176,25 +1261,28 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: "12px",
-                    width: "100%",
+                    width: "calc(100% - 12px)",
+                    margin: "0 6px",
+                    borderRadius: "5px",
                     textAlign: "left",
-                    padding: "4px 10px",
-                    background: selected ? "var(--ink, #f4f6ff)" : "transparent",
-                    color: selected ? "var(--knock, #05081a)" : "var(--ink, #f4f6ff)",
+                    padding: "5px 10px",
+                    background: selected ? "var(--selection, #2e436e)" : "transparent",
+                    color: selected ? "#ffffff" : "var(--ink)",
                     border: "none",
-                    borderBottom: "1px solid var(--faint, #27326b)",
-                    fontFamily: "inherit",
+                    fontFamily: "var(--mono)",
                     fontSize: "12px",
                     cursor: "pointer",
+                    boxSizing: "border-box",
                   }}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <span>{before}</span>
                     <mark
                       style={{
-                        background: selected ? "var(--sky, #3d6bff)" : "var(--unknown, #ffe45c)",
-                        color: selected ? "var(--ink, #f4f6ff)" : "var(--knock, #05081a)",
+                        background: selected ? "rgba(255, 228, 92, 0.28)" : "var(--unknown-bg-hi)",
+                        color: "var(--unknown)",
                         padding: "0 2px",
+                        borderRadius: "3px",
                       }}
                     >
                       {hit}
@@ -1204,12 +1292,14 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
                   <span
                     style={{
                       flexShrink: 0,
+                      fontFamily: "var(--ui-font)",
                       fontSize: "11px",
-                      color: selected ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
+                      color: selected ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
                     }}
                   >
                     {allWorktrees ? `[${m.worktreeName}] ` : ""}
-                    {m.filePath}:{m.line}
+                    {m.filePath}
+                    <span style={{ fontFamily: "var(--mono)" }}>:{m.line}</span>
                   </span>
                 </button>
               );
@@ -1222,39 +1312,54 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
           style={{
             flex: "1 1 45%",
             overflow: "auto",
-            background: "var(--screen, #0a0f2c)",
-            padding: "8px",
+            background: "var(--screen)",
+            padding: "10px 12px",
           }}
         >
           {activeMatch ? (
             <>
               <div
                 style={{
-                  fontSize: "11px",
-                  color: "var(--dim, #93a3de)",
-                  marginBottom: "6px",
-                  borderBottom: "1px solid var(--faint, #27326b)",
-                  paddingBottom: "4px",
+                  fontSize: "11.5px",
+                  color: "var(--dim)",
+                  marginBottom: "8px",
+                  borderBottom: "1px solid var(--faint)",
+                  paddingBottom: "5px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
                 }}
               >
-                {activeMatch.worktreeName} · {activeMatch.filePath}:{activeMatch.line}:{activeMatch.column}
+                <span>{activeMatch.worktreeName}</span>
+                <span>·</span>
+                <span style={{ fontFamily: "var(--mono)", color: "var(--ink)" }}>
+                  {activeMatch.filePath}:{activeMatch.line}:{activeMatch.column}
+                </span>
               </div>
-              <pre style={{ margin: 0, fontFamily: "inherit", fontSize: "12px", lineHeight: 1.5 }}>
+              <pre
+                style={{
+                  margin: 0,
+                  fontFamily: "var(--mono)",
+                  fontSize: "12px",
+                  lineHeight: 1.55,
+                }}
+              >
                 {previewLines.map((ln) => (
                   <div
                     key={ln.lineNumber}
                     style={{
                       display: "flex",
-                      gap: "10px",
-                      padding: "0 4px",
-                      background: ln.isTarget ? "var(--wash-hi, #111943)" : "transparent",
+                      gap: "12px",
+                      padding: "1px 6px",
+                      borderRadius: "4px",
+                      background: ln.isTarget ? "var(--wash-hi)" : "transparent",
                     }}
                   >
                     <span
                       style={{
                         minWidth: "42px",
                         textAlign: "right",
-                        color: ln.isTarget ? "var(--unknown, #ffe45c)" : "var(--dim, #93a3de)",
+                        color: ln.isTarget ? "var(--unknown)" : "var(--dim)",
                         userSelect: "none",
                       }}
                     >
@@ -1266,7 +1371,7 @@ export const FindInPathPopup: React.FC<FindInPathPopupProps> = ({
               </pre>
             </>
           ) : (
-            <div style={{ color: "var(--dim, #93a3de)" }}>Select a match to preview context.</div>
+            <div style={{ color: "var(--dim)" }}>Select a match to preview context.</div>
           )}
         </div>
       </div>
@@ -1343,44 +1448,60 @@ export const GoToLinePopup: React.FC<GoToLinePopupProps> = ({
         }}
         style={{
           ...modalBoxStyle,
-          width: "340px",
+          width: "360px",
           maxWidth: "92vw",
-          padding: "10px",
-          gap: "8px",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
-          <span>GO TO LINE:COLUMN ({formatShortcut("go-to-line", platform)})</span>
+        <div aria-hidden="true" style={accentTopBarStyle} />
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "9px 14px",
+            borderBottom: "1px solid var(--faint)",
+            background: "var(--paper)",
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: 600 }}>
+            <span>Go to Line:Column</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: "11px", color: "var(--dim)", fontWeight: 400 }}>
+              {formatShortcut("go-to-line", platform)}
+            </span>
+          </span>
           {maxLine ? (
-            <span style={{ color: "var(--dim, #93a3de)", fontWeight: 400 }}>1..{maxLine}</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: "11px", color: "var(--dim)" }}>
+              1..{maxLine}
+            </span>
           ) : null}
         </div>
-        <input
-          ref={inputRef}
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="142 or 142:18"
-          style={modalInputStyle}
-        />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "6px" }}>
-          <button type="button" onClick={onClose} style={pillBtnStyle}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={!valid}
-            style={{
-              ...pillBtnStyle,
-              background: "var(--ink, #f4f6ff)",
-              color: "var(--knock, #05081a)",
-              borderColor: "var(--ink, #f4f6ff)",
-              fontWeight: 700,
-              opacity: valid ? 1 : 0.45,
-            }}
-          >
-            Jump
-          </button>
+
+        <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="142 or 142:18"
+            style={{ ...modalInputStyle, fontFamily: "var(--mono)" }}
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+            <button type="button" onClick={onClose} style={pillBtnStyle}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!valid}
+              style={{
+                ...primaryCtaBtnStyle,
+                opacity: valid ? 1 : 0.45,
+                cursor: valid ? "pointer" : "not-allowed",
+              }}
+            >
+              Jump
+            </button>
+          </div>
         </div>
       </form>
     </div>
@@ -1490,20 +1611,39 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
           height: "78vh",
         }}
       >
+        <div aria-hidden="true" style={accentTopBarStyle} />
+
         <div
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "8px 10px",
-            borderBottom: "1px solid var(--faint, #27326b)",
-            background: "var(--paper, #05081a)",
+            padding: "10px 14px",
+            borderBottom: "1px solid var(--faint)",
+            background: "var(--paper)",
           }}
         >
-          <span style={{ fontWeight: 700 }}>
-            FEEDBACK PROMPT PREVIEW — {worktree.name} ({compiled.includedIds.length} items)
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: 600 }}>
+            <span>Feedback Prompt Preview</span>
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: 500,
+                color: "var(--dim)",
+                background: "var(--wash)",
+                border: "1px solid var(--faint)",
+                borderRadius: "4px",
+                padding: "1px 6px",
+              }}
+            >
+              {worktree.name} · {compiled.includedIds.length} items
+            </span>
           </span>
-          <button type="button" onClick={onClose} style={pillBtnStyle}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ ...pillBtnStyle, fontFamily: "var(--mono)", fontSize: "11px" }}
+          >
             Esc
           </button>
         </div>
@@ -1516,13 +1656,13 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
             alignItems: "center",
             justifyContent: "space-between",
             gap: "8px",
-            padding: "8px 10px",
-            borderBottom: "1px solid var(--faint, #27326b)",
-            background: "var(--screen, #0a0f2c)",
+            padding: "8px 14px",
+            borderBottom: "1px solid var(--faint)",
+            background: "var(--wash)",
           }}
         >
-          <div style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ color: "var(--dim, #93a3de)", fontSize: "11px", marginRight: "4px" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+            <span style={{ color: "var(--dim)", fontSize: "11.5px", marginRight: "4px" }}>
               Intents:
             </span>
             {ALL_INTENTS.map((item) => {
@@ -1534,10 +1674,9 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
                   aria-pressed={active}
                   onClick={() => toggleIntent(item.id)}
                   style={{
-                    ...pillBtnStyle,
-                    background: active ? "var(--ink, #f4f6ff)" : "var(--paper, #05081a)",
-                    color: active ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                    fontWeight: active ? 700 : 400,
+                    ...(active ? activePillBtnStyle : pillBtnStyle),
+                    fontFamily: "var(--mono)",
+                    fontSize: "10.5px",
                   }}
                 >
                   {item.label}
@@ -1546,8 +1685,8 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
             })}
           </div>
 
-          <div style={{ display: "inline-flex", alignItems: "center", gap: "12px", fontSize: "11px" }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "14px", fontSize: "12px", color: "var(--dim)" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer" }}>
               <input
                 type="checkbox"
                 checked={includeOutdated}
@@ -1555,7 +1694,7 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
               />
               <span>Include outdated</span>
             </label>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer" }}>
               <input
                 type="checkbox"
                 checked={resolveAfterCopy}
@@ -1571,13 +1710,13 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
           style={{
             flex: 1,
             margin: 0,
-            padding: "12px",
+            padding: "14px",
             overflow: "auto",
-            background: "var(--paper, #05081a)",
-            color: "var(--ink, #f4f6ff)",
-            fontFamily: "inherit",
+            background: "var(--screen)",
+            color: "var(--ink)",
+            fontFamily: "var(--mono)",
             fontSize: "12px",
-            lineHeight: 1.5,
+            lineHeight: 1.55,
             whiteSpace: "pre-wrap",
           }}
         >
@@ -1590,9 +1729,9 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
             display: "flex",
             justifyContent: "flex-end",
             gap: "8px",
-            padding: "8px 10px",
-            borderTop: "1px solid var(--faint, #27326b)",
-            background: "var(--screen, #0a0f2c)",
+            padding: "10px 14px",
+            borderTop: "1px solid var(--faint)",
+            background: "var(--paper)",
           }}
         >
           <button type="button" onClick={onClose} style={pillBtnStyle}>
@@ -1603,18 +1742,24 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
             disabled={!compiled.markdown}
             onClick={() => void handleCopy()}
             style={{
-              ...pillBtnStyle,
-              background: "var(--ink, #f4f6ff)",
-              color: "var(--knock, #05081a)",
-              borderColor: "var(--ink, #f4f6ff)",
-              fontWeight: 700,
-              padding: "4px 12px",
+              ...primaryCtaBtnStyle,
+              background: copied ? "var(--safe)" : "var(--accent, #3574f0)",
+              borderColor: copied ? "var(--safe)" : "var(--accent, #3574f0)",
+              color: copied ? "var(--knock)" : "#ffffff",
               opacity: compiled.markdown ? 1 : 0.45,
+              cursor: compiled.markdown ? "pointer" : "not-allowed",
             }}
           >
-            {copied
-              ? "Copied to Clipboard!"
-              : `Copy to Clipboard (${formatShortcut("copy-feedback-prompt", platform)})`}
+            {copied ? (
+              "Copied to Clipboard!"
+            ) : (
+              <>
+                <span>Copy to Clipboard</span>
+                <span style={{ fontFamily: "var(--mono)", fontSize: "11px", opacity: 0.85 }}>
+                  {formatShortcut("copy-feedback-prompt", platform)}
+                </span>
+              </>
+            )}
           </button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import type { WorktreeInfo } from "../../shared/protocol.js";
+import { Expect2CursorMark, IconGitBranch } from "../components/BrandMark.js";
 import { formatShortcut, type Platform } from "./keymap.js";
 import { formatRelativeActivity } from "./WorktreeStrip.js";
 
@@ -64,14 +65,14 @@ export const Statusline: React.FC<StatuslineProps> = ({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        gap: "10px",
-        height: "24px",
-        padding: "0 8px",
-        background: "var(--paper, #05081a)",
-        borderTop: "1px solid var(--faint, #27326b)",
-        color: "var(--ink, #f4f6ff)",
-        fontFamily: "var(--mono, 'Kode Mono', monospace)",
-        fontSize: "11px",
+        gap: "12px",
+        height: "26px",
+        padding: "0 10px",
+        background: "var(--paper)",
+        borderTop: "1px solid var(--faint)",
+        color: "var(--dim)",
+        fontFamily: "var(--ui-font)",
+        fontSize: "11.5px",
         userSelect: "none",
         whiteSpace: "nowrap",
         overflow: "hidden",
@@ -80,47 +81,72 @@ export const Statusline: React.FC<StatuslineProps> = ({
     >
       {/* Left Cluster */}
       <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+        <Expect2CursorMark height={13} fill="var(--dim)" />
+
         <span
           style={{
             display: "inline-flex",
             alignItems: "center",
-            background: "var(--ink, #f4f6ff)",
-            color: "var(--knock, #05081a)",
-            padding: "0 5px",
-            fontWeight: 700,
-            letterSpacing: "0.03em",
+            background: "var(--wash)",
+            border: "1px solid var(--faint)",
+            color: "var(--dim)",
+            padding: "1px 6px",
+            borderRadius: "4px",
+            fontSize: "10.5px",
+            fontWeight: 600,
+            letterSpacing: "0.04em",
           }}
         >
-          expect2 READ-ONLY
+          READ-ONLY
         </span>
 
         {worktree && (
-          <span style={{ color: "var(--dim, #93a3de)" }}>
-            ⎇ wt: <strong style={{ color: "var(--ink, #f4f6ff)" }}>{worktree.name}</strong> (
-            {worktree.branch}
-            {worktree.ahead > 0 ? ` ↑${worktree.ahead}` : ""})
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              color: "var(--dim)",
+              minWidth: 0,
+            }}
+          >
+            <IconGitBranch size={12} />
+            <span style={{ color: "var(--ink)", fontWeight: 500 }}>{worktree.name}</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: "11px", color: "var(--dim)" }}>
+              ({worktree.branch}
+              {worktree.ahead > 0 ? ` ↑${worktree.ahead}` : ""})
+            </span>
           </span>
         )}
 
         <span
           style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
             color: isFresh
-              ? "var(--unknown, #ffe45c)"
+              ? "var(--unknown)"
               : watcherActive
-                ? "var(--safe, #6dffa6)"
-                : "var(--off, #56659e)",
+                ? "var(--safe)"
+                : "var(--off)",
+            fontSize: "11px",
           }}
         >
-          {isFresh
-            ? `↻ updated ${formatRelativeActivity(updatedRef, now)} ago`
-            : watcherActive
-              ? "▣ watching"
-              : "◻ paused"}
+          <span style={{ fontFamily: "var(--mono)" }}>
+            {isFresh ? "↻" : watcherActive ? "▣" : "◻"}
+          </span>
+          <span>
+            {isFresh
+              ? `updated ${formatRelativeActivity(updatedRef, now)} ago`
+              : watcherActive
+                ? "watching"
+                : "paused"}
+          </span>
         </span>
       </div>
 
       {/* Right Cluster */}
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
         {filePath && (
           <button
             type="button"
@@ -129,11 +155,11 @@ export const Statusline: React.FC<StatuslineProps> = ({
             style={{
               background: "transparent",
               border: "none",
-              color: "var(--ink, #f4f6ff)",
-              fontFamily: "inherit",
+              color: "var(--ink)",
+              fontFamily: "var(--mono)",
               fontSize: "11px",
               cursor: onOpenGoToLine ? "pointer" : "default",
-              padding: 0,
+              padding: "0 4px",
             }}
           >
             {filePath}:{line}:{column}
@@ -141,7 +167,15 @@ export const Statusline: React.FC<StatuslineProps> = ({
         )}
 
         {language && (
-          <span style={{ color: "var(--dim, #93a3de)", textTransform: "uppercase" }}>
+          <span
+            style={{
+              color: "var(--dim)",
+              fontSize: "11px",
+              padding: "0 4px",
+              textTransform: "uppercase",
+              letterSpacing: "0.02em",
+            }}
+          >
             {language}
           </span>
         )}
@@ -152,9 +186,10 @@ export const Statusline: React.FC<StatuslineProps> = ({
           onClick={onToggleBlame}
           style={{
             ...statusBtnStyle,
-            background: blameEnabled ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-            color: blameEnabled ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-            fontWeight: blameEnabled ? 700 : 400,
+            background: blameEnabled ? "var(--selection, #2e436e)" : "transparent",
+            borderColor: blameEnabled ? "rgba(61, 107, 255, 0.45)" : "var(--faint)",
+            color: blameEnabled ? "#ffffff" : "var(--dim)",
+            fontWeight: blameEnabled ? 600 : 500,
           }}
         >
           Blame
@@ -166,9 +201,10 @@ export const Statusline: React.FC<StatuslineProps> = ({
           onClick={onToggleCrt}
           style={{
             ...statusBtnStyle,
-            background: crtEnabled ? "var(--ink, #f4f6ff)" : "var(--screen, #0a0f2c)",
-            color: crtEnabled ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-            fontWeight: crtEnabled ? 700 : 400,
+            background: crtEnabled ? "var(--selection, #2e436e)" : "transparent",
+            borderColor: crtEnabled ? "rgba(61, 107, 255, 0.45)" : "var(--faint)",
+            color: crtEnabled ? "#ffffff" : "var(--dim)",
+            fontWeight: crtEnabled ? 600 : 500,
           }}
         >
           CRT
@@ -180,8 +216,12 @@ export const Statusline: React.FC<StatuslineProps> = ({
           title={`Annotations (${formatShortcut("tool-annotations", platform)})`}
           style={{
             ...statusBtnStyle,
-            color: openAnnotationCount > 0 ? "var(--sky, #3d6bff)" : "var(--dim, #93a3de)",
-            fontWeight: openAnnotationCount > 0 ? 700 : 400,
+            fontFamily: "var(--mono)",
+            background: openAnnotationCount > 0 ? "var(--sky-bg)" : "transparent",
+            borderColor:
+              openAnnotationCount > 0 ? "rgba(61, 107, 255, 0.38)" : "var(--faint)",
+            color: openAnnotationCount > 0 ? "#8cb4ff" : "var(--dim)",
+            fontWeight: openAnnotationCount > 0 ? 600 : 500,
           }}
         >
           ◆ {openAnnotationCount}
@@ -193,15 +233,23 @@ export const Statusline: React.FC<StatuslineProps> = ({
           title={`Copy Feedback Prompt (${formatShortcut("copy-feedback-prompt", platform)})`}
           style={{
             ...statusBtnStyle,
-            background: copied ? "var(--safe, #6dffa6)" : "var(--ink, #f4f6ff)",
-            color: "var(--knock, #05081a)",
-            borderColor: copied ? "var(--safe, #6dffa6)" : "var(--ink, #f4f6ff)",
-            fontWeight: 700,
+            background: copied ? "var(--safe)" : "var(--accent, #3574f0)",
+            color: copied ? "var(--knock)" : "#ffffff",
+            borderColor: copied ? "var(--safe)" : "var(--accent, #3574f0)",
+            padding: "0 9px",
+            fontWeight: 600,
           }}
         >
-          {copied
-            ? "Copied!"
-            : `Copy Feedback Prompt ${formatShortcut("copy-feedback-prompt", platform)}`}
+          {copied ? (
+            "Copied!"
+          ) : (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+              <span>Copy Feedback Prompt</span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: "10.5px", opacity: 0.85 }}>
+                {formatShortcut("copy-feedback-prompt", platform)}
+              </span>
+            </span>
+          )}
         </button>
       </div>
     </footer>
@@ -209,13 +257,16 @@ export const Statusline: React.FC<StatuslineProps> = ({
 };
 
 const statusBtnStyle: React.CSSProperties = {
-  background: "var(--screen, #0a0f2c)",
-  border: "1px solid var(--faint, #27326b)",
-  color: "var(--ink, #f4f6ff)",
-  padding: "0 6px",
-  height: "18px",
-  fontFamily: "inherit",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "transparent",
+  border: "1px solid var(--faint)",
+  color: "var(--dim)",
+  padding: "0 7px",
+  height: "20px",
+  fontFamily: "var(--ui-font)",
   fontSize: "11px",
   cursor: "pointer",
-  borderRadius: 0,
+  borderRadius: "5px",
 };

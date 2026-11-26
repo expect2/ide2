@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Annotation, WorktreeInfo } from "../../shared/protocol.js";
+import { Expect2Wordmark, IconGitBranch } from "../components/BrandMark.js";
 import { formatShortcut, type Platform } from "./keymap.js";
 
 export const MORPH_FRAMES = ["◻", "▣", "◼", "▣"] as const;
@@ -66,6 +67,9 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
   const [baseRef, setBaseRef] = useState<string>("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState<boolean>(false);
+  const [hoveredWordmark, setHoveredWordmark] = useState<boolean>(false);
+  const [hoveredPillPath, setHoveredPillPath] = useState<string | null>(null);
+  const [hoveredAddBtn, setHoveredAddBtn] = useState<boolean>(false);
   const branchInputRef = useRef<HTMLInputElement | null>(null);
 
   const activeWorktree = useMemo(
@@ -173,24 +177,27 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: "6px",
-        padding: "4px 8px",
-        background: "var(--paper, #05081a)",
-        borderBottom: "1px solid var(--faint, #27326b)",
-        fontFamily: "var(--mono, 'Kode Mono', monospace)",
-        fontSize: "12px",
-        color: "var(--ink, #f4f6ff)",
+        gap: "8px",
+        padding: "0 12px",
+        height: "40px",
+        minHeight: "40px",
+        background: "var(--paper)",
+        borderBottom: "1px solid var(--faint)",
+        fontFamily: "var(--ui-font)",
+        fontSize: "12.5px",
+        color: "var(--ink)",
         userSelect: "none",
         overflowX: "auto",
-        minHeight: "34px",
         boxSizing: "border-box",
       }}
     >
-      {/* [expect2] wordmark badge */}
+      {/* expect2 pixel-art wordmark with 4-colour echo trail */}
       <button
         type="button"
         className="ide2-wordmark"
         onClick={onOpenSearchEverywhere}
+        onMouseEnter={() => setHoveredWordmark(true)}
+        onMouseLeave={() => setHoveredWordmark(false)}
         title={
           onOpenSearchEverywhere
             ? `Search Everywhere (${formatShortcut("search-everywhere", platform)})`
@@ -199,32 +206,31 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
         style={{
           display: "inline-flex",
           alignItems: "center",
-          border: "1px solid var(--faint, #27326b)",
-          background: "var(--screen, #0a0f2c)",
-          color: "var(--ink, #f4f6ff)",
-          padding: "2px 6px",
-          fontFamily: "inherit",
-          fontSize: "12px",
-          fontWeight: 600,
+          border: hoveredWordmark && onOpenSearchEverywhere
+            ? "1px solid var(--faint)"
+            : "1px solid transparent",
+          background: hoveredWordmark && onOpenSearchEverywhere
+            ? "var(--wash)"
+            : "transparent",
+          padding: "4px 7px",
           cursor: onOpenSearchEverywhere ? "pointer" : "default",
-          borderRadius: 0,
+          borderRadius: "6px",
           flexShrink: 0,
-          letterSpacing: "0.02em",
+          transition: "background 120ms ease, border-color 120ms ease",
         }}
       >
-        <span>expect</span>
-        <span
-          style={{
-            background: "var(--ink, #f4f6ff)",
-            color: "var(--knock, #05081a)",
-            padding: "0 3px",
-            marginLeft: "2px",
-            fontWeight: 700,
-          }}
-        >
-          2
-        </span>
+        <Expect2Wordmark height={18} withTrail={true} />
       </button>
+
+      <div
+        aria-hidden="true"
+        style={{
+          width: "1px",
+          height: "18px",
+          background: "var(--faint)",
+          flexShrink: 0,
+        }}
+      />
 
       {/* Worktree Pills */}
       <div
@@ -234,7 +240,7 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "4px",
+          gap: "5px",
           flex: 1,
           minWidth: 0,
           overflowX: "auto",
@@ -242,6 +248,7 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
       >
         {worktrees.map((wt) => {
           const isActive = wt.path === activeWorktreePath;
+          const isHovered = hoveredPillPath === wt.path;
           const isLive = now - wt.lastActivityAt < ACTIVE_WINDOW_MS;
           const spinner = MORPH_FRAMES[morphFrame] ?? "▣";
           const changedCount = getWorktreeChangedCount(wt);
@@ -251,20 +258,30 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
             <div
               key={wt.path}
               className={`ide2-worktree-pill${isActive ? " is-active" : ""}${isLive ? " is-live" : ""}`}
+              onMouseEnter={() => setHoveredPillPath(wt.path)}
+              onMouseLeave={() => setHoveredPillPath((cur) => (cur === wt.path ? null : cur))}
               style={{
                 display: "inline-flex",
                 alignItems: "stretch",
+                height: "28px",
                 border: isActive
-                  ? "1px solid var(--ink, #f4f6ff)"
-                  : "1px solid var(--faint, #27326b)",
+                  ? "1px solid rgba(61, 107, 255, 0.45)"
+                  : isHovered
+                    ? "1px solid var(--border-strong)"
+                    : "1px solid var(--faint)",
                 background: isActive
-                  ? "var(--ink, #f4f6ff)"
-                  : "var(--screen, #0a0f2c)",
+                  ? "var(--selection, #2e436e)"
+                  : isHovered
+                    ? "var(--wash-hi)"
+                    : "var(--wash)",
                 color: isActive
-                  ? "var(--knock, #05081a)"
-                  : "var(--ink, #f4f6ff)",
+                  ? "#ffffff"
+                  : isHovered
+                    ? "var(--ink)"
+                    : "var(--dim)",
                 flexShrink: 0,
-                borderRadius: 0,
+                borderRadius: "6px",
+                transition: "background 120ms ease, border-color 120ms ease, color 120ms ease",
               }}
               onContextMenu={(e) => handleOpenContextMenu(e, wt)}
             >
@@ -278,22 +295,41 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  padding: "2px 7px",
+                  padding: "0 8px",
                   background: "transparent",
                   color: "inherit",
                   border: "none",
-                  fontFamily: "inherit",
+                  fontFamily: "var(--ui-font)",
                   fontSize: "12px",
                   cursor: "pointer",
                   whiteSpace: "nowrap",
                 }}
               >
-                {isActive && <span aria-hidden="true">■</span>}
-                <span style={{ fontWeight: isActive ? 700 : 500 }}>{wt.name}</span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    color: isActive ? "#9bb8ff" : "var(--dim)",
+                  }}
+                >
+                  <IconGitBranch size={13} />
+                </span>
+
                 <span
                   style={{
-                    color: isActive ? "var(--knock, #05081a)" : "var(--dim, #93a3de)",
-                    opacity: isActive ? 0.8 : 1,
+                    fontWeight: isActive ? 600 : 500,
+                    color: isActive ? "#ffffff" : "var(--ink)",
+                  }}
+                >
+                  {wt.name}
+                </span>
+
+                <span
+                  style={{
+                    fontFamily: "var(--mono)",
+                    fontSize: "11px",
+                    color: isActive ? "rgba(255, 255, 255, 0.78)" : "var(--dim)",
                   }}
                 >
                   {wt.branch}
@@ -305,7 +341,9 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
                     className="ide2-morph-spinner"
                     title={`Agent activity ${formatRelativeActivity(wt.lastActivityAt, now)} ago`}
                     style={{
-                      color: isActive ? "var(--knock, #05081a)" : "var(--unknown, #ffe45c)",
+                      fontFamily: "var(--mono)",
+                      fontSize: "11px",
+                      color: "var(--unknown)",
                       fontWeight: 700,
                     }}
                   >
@@ -316,7 +354,9 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
                 {changedCount > 0 ? (
                   <span
                     style={{
-                      color: isActive ? "var(--knock, #05081a)" : "var(--unknown, #ffe45c)",
+                      fontFamily: "var(--mono)",
+                      fontSize: "11px",
+                      color: "var(--unknown)",
                       fontWeight: 600,
                     }}
                   >
@@ -325,8 +365,10 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
                 ) : (
                   <span
                     style={{
-                      color: isActive ? "var(--knock, #05081a)" : "var(--safe, #6dffa6)",
-                      opacity: isActive ? 0.75 : 0.9,
+                      fontSize: "11px",
+                      color: "var(--safe)",
+                      opacity: isActive ? 0.92 : 0.8,
+                      fontWeight: 500,
                     }}
                   >
                     clean
@@ -336,7 +378,9 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
                 {wt.counts.conflicted > 0 && (
                   <span
                     style={{
-                      color: isActive ? "var(--knock, #05081a)" : "var(--unsafe, #ff5d4d)",
+                      fontFamily: "var(--mono)",
+                      fontSize: "11px",
+                      color: "var(--unsafe)",
                       fontWeight: 700,
                     }}
                   >
@@ -348,8 +392,15 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
                   <span
                     title={`${openAnnCount} open annotation(s)`}
                     style={{
-                      color: isActive ? "var(--knock, #05081a)" : "var(--sky, #3d6bff)",
-                      fontWeight: 700,
+                      fontFamily: "var(--mono)",
+                      fontSize: "11px",
+                      color: isActive ? "#b8d0ff" : "#7fa4ff",
+                      background: isActive
+                        ? "rgba(255, 255, 255, 0.14)"
+                        : "var(--sky-bg)",
+                      padding: "0 5px",
+                      borderRadius: "4px",
+                      fontWeight: 600,
                     }}
                   >
                     ◆{openAnnCount}
@@ -365,15 +416,15 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
                 style={{
                   border: "none",
                   borderLeft: isActive
-                    ? "1px solid rgba(5, 8, 26, 0.25)"
-                    : "1px solid var(--faint, #27326b)",
+                    ? "1px solid rgba(255, 255, 255, 0.16)"
+                    : "1px solid var(--faint)",
                   background: "transparent",
-                  color: "inherit",
-                  padding: "0 5px",
+                  color: isActive ? "rgba(255, 255, 255, 0.8)" : "var(--dim)",
+                  padding: "0 6px",
                   cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontSize: "11px",
-                  opacity: 0.75,
+                  fontFamily: "var(--ui-font)",
+                  fontSize: "12px",
+                  borderRadius: "0 5px 5px 0",
                 }}
               >
                 ⋯
@@ -383,25 +434,32 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
         })}
       </div>
 
-      {/* [+ Worktree] Button */}
+      {/* + Worktree Pill Button */}
       <button
         type="button"
         className="ide2-add-worktree-btn"
         onClick={() => setCreateOpen(true)}
+        onMouseEnter={() => setHoveredAddBtn(true)}
+        onMouseLeave={() => setHoveredAddBtn(false)}
         title="Create new git worktree (git worktree add)"
         style={{
           display: "inline-flex",
           alignItems: "center",
           gap: "4px",
-          padding: "3px 8px",
-          background: "var(--wash, #0c1230)",
-          border: "1px solid var(--faint, #27326b)",
-          color: "var(--ink, #f4f6ff)",
-          fontFamily: "inherit",
+          height: "28px",
+          padding: "0 10px",
+          background: hoveredAddBtn ? "var(--wash-hi)" : "var(--wash)",
+          border: hoveredAddBtn
+            ? "1px solid var(--border-strong)"
+            : "1px solid var(--faint)",
+          color: "var(--ink)",
+          fontFamily: "var(--ui-font)",
           fontSize: "12px",
+          fontWeight: 500,
           cursor: "pointer",
-          borderRadius: 0,
+          borderRadius: "6px",
           flexShrink: 0,
+          transition: "background 120ms ease, border-color 120ms ease",
         }}
       >
         + Worktree
@@ -418,24 +476,34 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
             left: `${contextMenu.x}px`,
             top: `${contextMenu.y}px`,
             zIndex: 1200,
-            background: "var(--wash, #0c1230)",
-            border: "2px solid var(--ink, #f4f6ff)",
-            boxShadow: "4px 4px 0 var(--sky, #3d6bff)",
-            minWidth: "200px",
-            padding: "4px 0",
-            fontFamily: "var(--mono, 'Kode Mono', monospace)",
-            fontSize: "12px",
+            background: "var(--wash)",
+            border: "1px solid var(--border-strong)",
+            borderRadius: "8px",
+            boxShadow: "var(--shadow-popup)",
+            minWidth: "210px",
+            padding: "4px",
+            fontFamily: "var(--ui-font)",
+            fontSize: "12.5px",
           }}
         >
           <div
             style={{
-              padding: "4px 10px",
-              color: "var(--dim, #93a3de)",
-              borderBottom: "1px solid var(--faint, #27326b)",
+              padding: "5px 8px 6px",
+              color: "var(--dim)",
+              borderBottom: "1px solid var(--faint)",
+              marginBottom: "3px",
               fontSize: "11px",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
             }}
           >
-            {contextMenu.worktree.name} ({contextMenu.worktree.branch})
+            <span style={{ color: "var(--ink)", fontWeight: 600 }}>
+              {contextMenu.worktree.name}
+            </span>
+            <span style={{ fontFamily: "var(--mono)" }}>
+              {contextMenu.worktree.branch}
+            </span>
           </div>
           <button
             type="button"
@@ -484,7 +552,7 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(5, 8, 26, 0.72)",
+            background: "rgba(10, 12, 16, 0.64)",
             display: "flex",
             alignItems: "flex-start",
             justifyContent: "center",
@@ -504,115 +572,143 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
             style={{
               width: "440px",
               maxWidth: "92vw",
-              background: "var(--wash, #0c1230)",
-              border: "2px solid var(--ink, #f4f6ff)",
-              boxShadow: "4px 4px 0 var(--sky, #3d6bff)",
-              padding: "12px",
-              fontFamily: "var(--mono, 'Kode Mono', monospace)",
-              color: "var(--ink, #f4f6ff)",
+              background: "var(--wash)",
+              border: "1px solid var(--border-strong)",
+              borderRadius: "10px",
+              boxShadow: "var(--shadow-modal)",
+              overflow: "hidden",
+              fontFamily: "var(--ui-font)",
+              color: "var(--ink)",
               display: "flex",
               flexDirection: "column",
-              gap: "10px",
             }}
           >
+            <div
+              aria-hidden="true"
+              style={{
+                height: "2px",
+                width: "100%",
+                background: "var(--expect2-trail-bar)",
+                flexShrink: 0,
+              }}
+            />
+
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                borderBottom: "1px solid var(--faint, #27326b)",
-                paddingBottom: "6px",
-                fontWeight: 700,
+                borderBottom: "1px solid var(--faint)",
+                padding: "10px 14px",
+                background: "var(--paper)",
               }}
             >
-              <span>┌─ NEW GIT WORKTREE ─┐</span>
+              <span style={{ fontWeight: 600, fontSize: "13px", color: "var(--ink)" }}>
+                New Git Worktree
+              </span>
               <button
                 type="button"
                 onClick={() => setCreateOpen(false)}
                 style={{
-                  background: "transparent",
-                  border: "1px solid var(--faint, #27326b)",
-                  color: "var(--dim, #93a3de)",
+                  background: "var(--wash)",
+                  border: "1px solid var(--border-strong)",
+                  borderRadius: "5px",
+                  color: "var(--dim)",
                   cursor: "pointer",
-                  padding: "1px 6px",
-                  fontFamily: "inherit",
+                  padding: "2px 7px",
+                  fontFamily: "var(--mono)",
+                  fontSize: "11px",
                 }}
               >
                 Esc
               </button>
             </div>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" }}>
-              <span style={{ color: "var(--dim, #93a3de)" }}>New Branch Name</span>
-              <input
-                ref={branchInputRef}
-                type="text"
-                value={branchName}
-                onChange={(e) => setBranchName(e.target.value)}
-                placeholder="feat/agent-task"
-                style={inputStyle}
-                disabled={creating}
-              />
-            </label>
+            <div
+              style={{
+                padding: "14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+              }}
+            >
+              <label style={{ display: "flex", flexDirection: "column", gap: "5px", fontSize: "12px" }}>
+                <span style={{ color: "var(--dim)", fontWeight: 500 }}>New Branch Name</span>
+                <input
+                  ref={branchInputRef}
+                  type="text"
+                  value={branchName}
+                  onChange={(e) => setBranchName(e.target.value)}
+                  placeholder="feat/agent-task"
+                  style={inputStyle}
+                  disabled={creating}
+                />
+              </label>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" }}>
-              <span style={{ color: "var(--dim, #93a3de)" }}>Base Ref (optional)</span>
-              <input
-                type="text"
-                value={baseRef}
-                onChange={(e) => setBaseRef(e.target.value)}
-                placeholder="main"
-                style={inputStyle}
-                disabled={creating}
-              />
-            </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "5px", fontSize: "12px" }}>
+                <span style={{ color: "var(--dim)", fontWeight: 500 }}>Base Ref (optional)</span>
+                <input
+                  type="text"
+                  value={baseRef}
+                  onChange={(e) => setBaseRef(e.target.value)}
+                  placeholder="main"
+                  style={inputStyle}
+                  disabled={creating}
+                />
+              </label>
 
-            {createError && (
-              <div
-                style={{
-                  color: "var(--unsafe, #ff5d4d)",
-                  border: "1px solid var(--unsafe, #ff5d4d)",
-                  padding: "6px 8px",
-                  fontSize: "12px",
-                }}
-              >
-                {createError}
+              {createError && (
+                <div
+                  style={{
+                    color: "var(--unsafe)",
+                    background: "var(--unsafe-bg)",
+                    border: "1px solid rgba(255, 93, 77, 0.35)",
+                    borderRadius: "6px",
+                    padding: "7px 10px",
+                    fontSize: "12px",
+                  }}
+                >
+                  {createError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "4px" }}>
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(false)}
+                  disabled={creating}
+                  style={{
+                    background: "var(--screen)",
+                    border: "1px solid var(--border-strong)",
+                    borderRadius: "6px",
+                    color: "var(--ink)",
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                    fontFamily: "var(--ui-font)",
+                    fontSize: "12px",
+                    fontWeight: 500,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  style={{
+                    background: "var(--accent, #3574f0)",
+                    border: "1px solid var(--accent, #3574f0)",
+                    borderRadius: "6px",
+                    color: "#ffffff",
+                    padding: "6px 14px",
+                    cursor: creating ? "wait" : "pointer",
+                    fontFamily: "var(--ui-font)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                  }}
+                >
+                  {creating ? "Creating..." : "Create Worktree"}
+                </button>
               </div>
-            )}
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "4px" }}>
-              <button
-                type="button"
-                onClick={() => setCreateOpen(false)}
-                disabled={creating}
-                style={{
-                  background: "var(--screen, #0a0f2c)",
-                  border: "1px solid var(--faint, #27326b)",
-                  color: "var(--dim, #93a3de)",
-                  padding: "4px 10px",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontSize: "12px",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={creating}
-                style={{
-                  background: "var(--ink, #f4f6ff)",
-                  border: "1px solid var(--ink, #f4f6ff)",
-                  color: "var(--knock, #05081a)",
-                  padding: "4px 12px",
-                  cursor: creating ? "wait" : "pointer",
-                  fontFamily: "inherit",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                }}
-              >
-                {creating ? "Creating..." : "Create Worktree"}
-              </button>
             </div>
           </form>
         </div>
@@ -627,20 +723,21 @@ const menuItemStyle: React.CSSProperties = {
   textAlign: "left",
   background: "transparent",
   border: "none",
-  color: "var(--ink, #f4f6ff)",
-  padding: "6px 10px",
+  borderRadius: "5px",
+  color: "var(--ink)",
+  padding: "6px 8px",
   cursor: "pointer",
-  fontFamily: "inherit",
+  fontFamily: "var(--ui-font)",
   fontSize: "12px",
 };
 
 const inputStyle: React.CSSProperties = {
-  background: "var(--screen, #0a0f2c)",
-  border: "1px solid var(--faint, #27326b)",
-  color: "var(--ink, #f4f6ff)",
-  padding: "6px 8px",
-  fontFamily: "inherit",
-  fontSize: "12px",
+  background: "var(--screen)",
+  border: "1px solid var(--border-strong)",
+  borderRadius: "6px",
+  color: "var(--ink)",
+  padding: "7px 10px",
+  fontFamily: "var(--mono)",
+  fontSize: "12.5px",
   outline: "none",
-  borderRadius: 0,
 };

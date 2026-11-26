@@ -18,6 +18,17 @@ import type {
   WorktreeInfo,
 } from "../shared/protocol.js";
 import {
+  Expect2Wordmark,
+  IconAnnotations,
+  IconDiff,
+  IconExport,
+  IconGitBranch,
+  IconProject,
+  IconSearch,
+  IconSplit,
+  IconStructure,
+} from "./components/BrandMark.js";
+import {
   formatShortcut,
   isEditableElement,
   KeymapDispatcher,
@@ -1143,8 +1154,8 @@ export const App: React.FC = () => {
     return (
       <div className="ide-root">
         <div className="editor-empty">
-          <span className="brand-mark">expect2</span>
-          <span>loading workspace…</span>
+          <Expect2Wordmark height={34} withTrail={true} />
+          <span style={{ fontSize: "12.5px", color: "var(--dim)" }}>Loading workspace…</span>
         </div>
       </div>
     );
@@ -1179,20 +1190,20 @@ export const App: React.FC = () => {
 
       {/* 2. Navigation Breadcrumb & Action Bar */}
       <div className="ide-breadcrumb">
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
           <span style={{ color: "var(--ink)", fontWeight: 600 }}>{context.repoName}</span>
-          <span style={{ color: "var(--faint)" }}>▸</span>
-          <span style={{ color: "var(--dim)" }}>⎇ {activeWorktree.name}</span>
+          <span style={{ color: "var(--off)" }}>›</span>
+          <span style={{ color: "var(--dim)" }}>{activeWorktree.name}</span>
           {activeTab && (
             <>
-              <span style={{ color: "var(--faint)" }}>▸</span>
-              <span style={{ color: "var(--ink)" }}>
-                {activeTab.filePath.split("/").join(" ▸ ")}
+              <span style={{ color: "var(--off)" }}>›</span>
+              <span style={{ color: "var(--ink)", fontFamily: "var(--mono)", fontSize: "12px" }}>
+                {activeTab.filePath.split("/").join(" › ")}
               </span>
             </>
           )}
           {activeChangedFile && (
-            <span style={{ fontSize: "11px", marginLeft: "6px" }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: "11.5px", marginLeft: "6px" }}>
               <span style={{ color: "var(--safe)" }}>+{activeChangedFile.additions}</span>{" "}
               <span style={{ color: "var(--unsafe)" }}>-{activeChangedFile.deletions}</span>
             </span>
@@ -1202,28 +1213,33 @@ export const App: React.FC = () => {
         <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
           <button
             type="button"
-            className="btn"
+            className="btn btn-ghost"
             onClick={() => setSearchPopup({ open: true, tab: "all" })}
             title="Search Everywhere (Shift+Shift)"
           >
-            Search <span className="kbd-hint">⇧⇧</span>
+            <IconSearch size={13} />
+            <span>Search</span>
+            <span className="kbd-hint">⇧⇧</span>
           </button>
           <button
             type="button"
-            className="btn"
+            className="btn btn-ghost"
             onClick={() => setFindInPathOpen(true)}
             title={`Find in Path (${formatShortcut("find-in-path", platform)})`}
           >
-            Find <span className="kbd-hint">{formatShortcut("find-in-path", platform)}</span>
+            <span>Find in Path</span>
+            <span className="kbd-hint">{formatShortcut("find-in-path", platform)}</span>
           </button>
           {activeTab && (
             <button
               type="button"
-              className={`btn${activeTab.viewKind === "diff" ? " btn-primary" : ""}`}
+              className={`btn${activeTab.viewKind === "diff" ? " btn-primary" : " btn-ghost"}`}
               onClick={() => runAction("toggle-diff")}
               title={`Toggle Diff (${formatShortcut("toggle-diff", platform)})`}
             >
-              Diff <span className="kbd-hint">{formatShortcut("toggle-diff", platform)}</span>
+              <IconDiff size={13} />
+              <span>Diff</span>
+              <span className="kbd-hint">{formatShortcut("toggle-diff", platform)}</span>
             </button>
           )}
           <button
@@ -1232,7 +1248,8 @@ export const App: React.FC = () => {
             onClick={() => setExportModalOpen(true)}
             title={`Preview & Export Feedback Prompt (${formatShortcut("export-prompt-preview", platform)})`}
           >
-            Export Prompt ({openWtAnnotationCount})
+            <IconExport size={13} />
+            <span>Export Prompt{openWtAnnotationCount > 0 ? ` (${openWtAnnotationCount})` : ""}</span>
           </button>
         </div>
       </div>
@@ -1244,33 +1261,36 @@ export const App: React.FC = () => {
             type="button"
             className={`tool-stripe-btn${leftTool === "project" ? " active" : ""}`}
             onClick={() => runAction("tool-project")}
-            title={`1: Project (${formatShortcut("tool-project", platform)})`}
+            title={`Project (${formatShortcut("tool-project", platform)})`}
           >
-            1
+            <IconProject />
           </button>
           <button
             type="button"
             className={`tool-stripe-btn${leftTool === "structure" ? " active" : ""}`}
             onClick={() => runAction("tool-structure")}
-            title={`7: Structure (${formatShortcut("tool-structure", platform)})`}
+            title={`Structure (${formatShortcut("tool-structure", platform)})`}
           >
-            7
+            <IconStructure />
           </button>
           <button
             type="button"
             className={`tool-stripe-btn${bottomTool === "git" ? " active" : ""}`}
             onClick={() => runAction("tool-git")}
-            title={`9: Git & Worktrees (${formatShortcut("tool-git", platform)})`}
+            title={`Git & Worktrees (${formatShortcut("tool-git", platform)})`}
           >
-            9
+            <IconGitBranch />
           </button>
           <button
             type="button"
             className={`tool-stripe-btn${rightAnnotationsOpen ? " active" : ""}`}
             onClick={() => runAction("tool-annotations")}
-            title={`6: Annotations (${formatShortcut("tool-annotations", platform)})`}
+            title={`Annotations (${formatShortcut("tool-annotations", platform)})`}
           >
-            6
+            <IconAnnotations />
+            {openWtAnnotationCount > 0 && (
+              <span className="tool-stripe-badge">{openWtAnnotationCount}</span>
+            )}
           </button>
         </aside>
 
@@ -1365,17 +1385,11 @@ export const App: React.FC = () => {
                       )}
                       <button
                         type="button"
+                        className="tab-close-btn"
                         aria-label={`Close ${baseName}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleCloseTab(tab.id);
-                        }}
-                        style={{
-                          border: "none",
-                          background: "transparent",
-                          color: "var(--dim)",
-                          padding: "0 2px",
-                          fontSize: "12px",
                         }}
                       >
                         ×
@@ -1384,7 +1398,7 @@ export const App: React.FC = () => {
                   );
                 })}
 
-                <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", paddingRight: "6px" }}>
+                <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", paddingRight: "8px" }}>
                   {activeTab && (
                     <button
                       type="button"
@@ -1392,7 +1406,8 @@ export const App: React.FC = () => {
                       onClick={() => runAction("split-right")}
                       title={`Split Editor Right (${formatShortcut("split-right", platform)})`}
                     >
-                      ◫ Split
+                      <IconSplit size={13} />
+                      <span>Split</span>
                     </button>
                   )}
                 </div>
@@ -1416,17 +1431,20 @@ export const App: React.FC = () => {
               </div>
             ) : (
               <div className="editor-empty">
-                <div style={{ fontSize: "14px", color: "var(--ink)", fontWeight: 600 }}>
-                  expect2 IDE · Read-Only Workspace
+                <Expect2Wordmark height={42} withTrail={true} />
+                <div style={{ fontSize: "12.5px", color: "var(--dim)" }}>
+                  Read-only IDE for reviewing agent-authored code & worktrees
                 </div>
-                <div style={{ fontSize: "12px", color: "var(--dim)" }}>
-                  <span>Search Everywhere </span>
+                <div className="editor-empty-shortcuts">
+                  <span>Search Everywhere</span>
                   <span className="kbd-hint">⇧⇧</span>
-                  <span> · Go to File </span>
+                  <span>Go to File</span>
                   <span className="kbd-hint">{formatShortcut("go-to-file", platform)}</span>
-                  <span> · Recent Files </span>
+                  <span>Recent Files</span>
                   <span className="kbd-hint">{formatShortcut("recent-files", platform)}</span>
-                  <span> · Git & Worktrees </span>
+                  <span>Find in Path</span>
+                  <span className="kbd-hint">{formatShortcut("find-in-path", platform)}</span>
+                  <span>Git & Worktrees</span>
                   <span className="kbd-hint">{formatShortcut("tool-git", platform)}</span>
                 </div>
               </div>
@@ -1645,19 +1663,24 @@ export const App: React.FC = () => {
           role="status"
           style={{
             position: "fixed",
-            right: "14px",
-            bottom: "34px",
+            right: "16px",
+            bottom: "38px",
             zIndex: 1200,
-            background: "var(--ink)",
-            color: "var(--knock)",
-            border: "2px solid var(--sky)",
-            padding: "5px 12px",
-            fontSize: "12px",
-            fontWeight: 700,
-            boxShadow: "4px 4px 0 var(--sky)",
+            background: "var(--wash)",
+            color: "var(--ink)",
+            border: "1px solid var(--border-strong)",
+            borderRadius: "8px",
+            padding: "8px 14px",
+            fontSize: "12.5px",
+            fontWeight: 500,
+            boxShadow: "var(--shadow-popup)",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
           }}
         >
-          ✔ {toast}
+          <span style={{ color: "var(--safe)", fontWeight: 700 }}>✔</span>
+          <span>{toast}</span>
         </div>
       )}
     </div>

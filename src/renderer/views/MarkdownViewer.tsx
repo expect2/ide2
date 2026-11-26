@@ -282,16 +282,16 @@ const MermaidBlock: React.FC<{ code: string }> = ({ code }) => {
           theme: "base",
           themeVariables: {
             darkMode: true,
-            background: "#0a0f2c",
-            primaryColor: "#111943",
+            background: "#1e1f22",
+            primaryColor: "#2b2d34",
             primaryBorderColor: "#3d6bff",
-            primaryTextColor: "#f4f6ff",
-            secondaryColor: "#0c1230",
-            tertiaryColor: "#05081a",
-            lineColor: "#93a3de",
-            textColor: "#f4f6ff",
+            primaryTextColor: "#dfe1e5",
+            secondaryColor: "#24262b",
+            tertiaryColor: "#181a1f",
+            lineColor: "#8b909a",
+            textColor: "#dfe1e5",
             fontFamily:
-              "Kode Mono Variable, Kode Mono, ui-monospace, monospace",
+              "-apple-system, BlinkMacSystemFont, Inter, Segoe UI, sans-serif",
           },
         });
         mermaidInitialized = true;

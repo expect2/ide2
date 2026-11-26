@@ -399,7 +399,7 @@ async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> 
     height: 940,
     minWidth: 920,
     minHeight: 600,
-    backgroundColor: "#05081a",
+    backgroundColor: "#181a1f",
     darkTheme: true,
     autoHideMenuBar: process.platform !== "darwin",
     title: `expect2 IDE — ${launchContext.repoName}`,
