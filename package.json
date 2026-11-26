@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "ide2 — read-only, JetBrains-inspired IDE for the AI coding era",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/main/index.cjs",
   "bin": {
