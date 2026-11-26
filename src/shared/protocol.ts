@@ -316,6 +316,27 @@ export interface WalkthroughState {
   agentThinking: boolean;
 }
 
+export type ReviewUserAction = "feedback" | "approve" | "cancel";
+
+export interface ReviewUserResponse {
+  action: ReviewUserAction;
+  worktreePath: string;
+  includeOutdated?: boolean;
+  resolveAfterSend?: boolean;
+}
+
+export interface ReviewSessionState {
+  sessionId: string;
+  repoCommonDir: string;
+  worktreePath: string;
+  label?: string;
+  awaitingUser: boolean;
+  agentWorking: boolean;
+  round: number;
+  resolveOnSend: boolean;
+  updatedAt: number;
+}
+
 export type WorkspaceEvent =
   | {
       type: "worktrees-updated";
@@ -351,6 +372,10 @@ export type WorkspaceEvent =
   | {
       type: "walkthrough-updated";
       walkthrough: WalkthroughState | null;
+    }
+  | {
+      type: "review-updated";
+      review: ReviewSessionState | null;
     };
 
 export interface Ide2Bridge {
@@ -359,6 +384,7 @@ export interface Ide2Bridge {
     worktrees: WorktreeInfo[];
     annotations: Annotation[];
     walkthrough: WalkthroughState | null;
+    review: ReviewSessionState | null;
   }>;
   listFiles(worktreePath: string): Promise<FileEntry[]>;
   fuzzyFindFiles(params: {
@@ -401,5 +427,7 @@ export interface Ide2Bridge {
   respondWalkthrough(response: WalkthroughUserResponse): Promise<void>;
   endWalkthrough(): Promise<void>;
   getWalkthroughAgentPrompt(): Promise<string>;
+  sendReviewResponse(response: ReviewUserResponse): Promise<{ sent: boolean; count: number }>;
+  getReviewAgentPrompt(): Promise<string>;
   onEvent(listener: (event: WorkspaceEvent) => void): () => void;
 }

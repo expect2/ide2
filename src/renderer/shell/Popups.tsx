@@ -1516,7 +1516,9 @@ export interface ExportPromptModalProps {
   worktree: WorktreeInfo;
   annotations: readonly Annotation[];
   platform: Platform;
+  reviewConnected?: boolean;
   onCopyFeedbackPrompt: (options: ExportPromptOptions, compiledMarkdown: string) => Promise<void> | void;
+  onSendToAgent?: (options: { includeOutdated: boolean; resolveAfterSend: boolean }) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -1525,7 +1527,9 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
   worktree,
   annotations,
   platform,
+  reviewConnected = false,
   onCopyFeedbackPrompt,
+  onSendToAgent,
   onClose,
 }) => {
   const [includeOutdated, setIncludeOutdated] = useState<boolean>(false);
@@ -1691,15 +1695,46 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
           <button type="button" onClick={onClose} style={pillBtnStyle}>
             Close
           </button>
+          {reviewConnected && onSendToAgent && (
+            <button
+              type="button"
+              disabled={!compiled.markdown}
+              onClick={() =>
+                void onSendToAgent({
+                  includeOutdated,
+                  resolveAfterSend: resolveAfterCopy,
+                })
+              }
+              style={{
+                ...primaryCtaBtnStyle,
+                opacity: compiled.markdown ? 1 : 0.45,
+                cursor: compiled.markdown ? "pointer" : "not-allowed",
+              }}
+            >
+              Send to Agent →
+            </button>
+          )}
           <button
             type="button"
             disabled={!compiled.markdown}
             onClick={() => void handleCopy()}
             style={{
-              ...primaryCtaBtnStyle,
-              background: copied ? "var(--safe)" : "var(--accent, #3574f0)",
-              borderColor: copied ? "var(--safe)" : "var(--accent, #3574f0)",
-              color: copied ? "var(--knock)" : "#ffffff",
+              ...(reviewConnected ? pillBtnStyle : primaryCtaBtnStyle),
+              background: copied
+                ? "var(--safe)"
+                : reviewConnected
+                  ? "var(--screen)"
+                  : "var(--accent, #3574f0)",
+              borderColor: copied
+                ? "var(--safe)"
+                : reviewConnected
+                  ? "var(--border-strong)"
+                  : "var(--accent, #3574f0)",
+              color: copied
+                ? "var(--knock)"
+                : reviewConnected
+                  ? "var(--ink)"
+                  : "#ffffff",
               opacity: compiled.markdown ? 1 : 0.45,
               cursor: compiled.markdown ? "pointer" : "not-allowed",
             }}

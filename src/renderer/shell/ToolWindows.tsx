@@ -1495,11 +1495,13 @@ export interface AnnotationsToolWindowProps {
   worktree: WorktreeInfo;
   annotations: readonly Annotation[];
   platform: Platform;
+  reviewConnected?: boolean;
   onJumpToAnnotation: (annotation: Annotation) => void;
   onSaveWorktreeNote: (comment: string, existingNote?: Annotation) => Promise<void> | void;
   onUpdateAnnotationStatus: (id: string, status: AnnotationStatus) => Promise<void> | void;
   onDeleteAnnotation: (id: string) => Promise<void> | void;
   onCopyFeedbackPrompt: (options: ExportPromptOptions) => Promise<void> | void;
+  onSendToAgent?: (options: { resolveAfterSend: boolean }) => Promise<void> | void;
   onClose?: () => void;
 }
 
@@ -1507,11 +1509,13 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
   worktree,
   annotations,
   platform,
+  reviewConnected = false,
   onJumpToAnnotation,
   onSaveWorktreeNote,
   onUpdateAnnotationStatus,
   onDeleteAnnotation,
   onCopyFeedbackPrompt,
+  onSendToAgent,
   onClose,
 }) => {
   const [statusFilter, setStatusFilter] = useState<AnnotationStatus | "all">("open");
@@ -1874,14 +1878,44 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
           </pre>
         )}
 
+        {reviewConnected && onSendToAgent && (
+          <button
+            type="button"
+            onClick={() => void onSendToAgent({ resolveAfterSend: resolveOnCopy })}
+            disabled={compiled.includedIds.length === 0}
+            style={{
+              background: "var(--accent, #3574f0)",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "6px",
+              padding: "7px 12px",
+              fontFamily: "var(--ui-font)",
+              fontSize: "12.5px",
+              fontWeight: 600,
+              cursor: compiled.includedIds.length === 0 ? "not-allowed" : "pointer",
+              opacity: compiled.includedIds.length === 0 ? 0.45 : 1,
+            }}
+          >
+            Send Feedback to Agent ({compiled.includedIds.length}) →
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => void handleCopyPrompt()}
           disabled={compiled.includedIds.length === 0}
           style={{
-            background: copiedNotice ? "var(--safe)" : "var(--accent, #3574f0)",
-            color: copiedNotice ? "var(--knock)" : "#ffffff",
-            border: "none",
+            background: copiedNotice
+              ? "var(--safe)"
+              : reviewConnected
+                ? "var(--wash)"
+                : "var(--accent, #3574f0)",
+            color: copiedNotice
+              ? "var(--knock)"
+              : reviewConnected
+                ? "var(--ink)"
+                : "#ffffff",
+            border: reviewConnected ? "1px solid var(--border-strong)" : "none",
             borderRadius: "6px",
             padding: "7px 12px",
             fontFamily: "var(--ui-font)",

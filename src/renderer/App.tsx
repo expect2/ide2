@@ -14,6 +14,7 @@ import type {
   LaunchContext,
   LineBlame,
   RecentProject,
+  ReviewSessionState,
   SearchMatch,
   WalkthroughState,
   WalkthroughStep,
@@ -71,6 +72,7 @@ import { WorktreeStrip } from "./shell/WorktreeStrip.js";
 import { CodeViewport } from "./views/CodeViewport.js";
 import { DiffViewport, type DiffViewMode } from "./views/DiffViewport.js";
 import { MarkdownViewer, type MarkdownViewMode } from "./views/MarkdownViewer.js";
+import { ReviewSessionBar } from "./views/ReviewSessionBar.js";
 import { WalkthroughBar } from "./views/WalkthroughBar.js";
 import { WalkthroughCard } from "./views/WalkthroughCard.js";
 
@@ -198,6 +200,8 @@ export const App: React.FC = () => {
     seq: number;
   } | null>(null);
   const [walkthrough, setWalkthrough] = useState<WalkthroughState | null>(null);
+  const [review, setReview] = useState<ReviewSessionState | null>(null);
+  const [agentMenuOpen, setAgentMenuOpen] = useState<boolean>(false);
   const [viewedStepId, setViewedStepId] = useState<string>("");
   const [folderFocusReq, setFolderFocusReq] = useState<{
     dirPath: string;
@@ -450,7 +454,7 @@ export const App: React.FC = () => {
     let mounted = true;
     window.ide2
       .getBootstrap()
-      .then(async ({ context: ctx, worktrees: wts, annotations: anns, walkthrough: initialWtTour }) => {
+      .then(async ({ context: ctx, worktrees: wts, annotations: anns, walkthrough: initialWtTour, review: initialReview }) => {
         if (!mounted) return;
         setContext(ctx);
         setWorktrees(wts);
@@ -458,6 +462,9 @@ export const App: React.FC = () => {
         if (initialWtTour) {
           setWalkthrough(initialWtTour);
           setViewedStepId(initialWtTour.activeStepId);
+        }
+        if (initialReview) {
+          setReview(initialReview);
         }
 
         const initialWt =
@@ -628,6 +635,8 @@ export const App: React.FC = () => {
         }
       } else if (event.type === "native-shortcut") {
         runActionRef.current(event.action as IdeAction);
+      } else if (event.type === "review-updated") {
+        setReview(event.review);
       } else if (event.type === "walkthrough-updated") {
         setWalkthrough(event.walkthrough);
         if (!event.walkthrough) {
@@ -708,6 +717,7 @@ export const App: React.FC = () => {
   }, [projectMenuOpen]);
 
   const handleCopyWalkthroughPrompt = useCallback(async () => {
+    setAgentMenuOpen(false);
     try {
       const prompt = await window.ide2.getWalkthroughAgentPrompt();
       await window.ide2.copyToClipboard(prompt);
@@ -716,6 +726,68 @@ export const App: React.FC = () => {
       showToast(err instanceof Error ? err.message : String(err));
     }
   }, [showToast]);
+
+  const handleCopyReviewPrompt = useCallback(async () => {
+    setAgentMenuOpen(false);
+    try {
+      const prompt = await window.ide2.getReviewAgentPrompt();
+      await window.ide2.copyToClipboard(prompt);
+      showToast("Copied Live Review Prompt — paste into your agent for zero-copy-paste reviews!");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    }
+  }, [showToast]);
+
+  const handleSendReviewFeedback = useCallback(
+    async (opts?: { includeOutdated?: boolean; resolveAfterSend?: boolean }) => {
+      if (!activeWorktreePath) return;
+      const res = await window.ide2.sendReviewResponse({
+        action: "feedback",
+        worktreePath: activeWorktreePath,
+        includeOutdated: opts?.includeOutdated,
+        resolveAfterSend: opts?.resolveAfterSend ?? review?.resolveOnSend ?? true,
+      });
+      if (!res.sent || res.count === 0) {
+        showToast("No open annotations in current worktree to send");
+        return;
+      }
+      showToast(
+        `Sent ${res.count} annotation${res.count === 1 ? "" : "s"} directly to coding agent`,
+      );
+    },
+    [activeWorktreePath, review?.resolveOnSend, showToast],
+  );
+
+  const handleApproveReview = useCallback(async () => {
+    if (!activeWorktreePath) return;
+    await window.ide2.sendReviewResponse({
+      action: "approve",
+      worktreePath: activeWorktreePath,
+    });
+    showToast("Approved — notified coding agent");
+  }, [activeWorktreePath, showToast]);
+
+  const handleCancelReview = useCallback(async () => {
+    if (!activeWorktreePath) return;
+    await window.ide2.sendReviewResponse({
+      action: "cancel",
+      worktreePath: activeWorktreePath,
+    });
+  }, [activeWorktreePath]);
+
+  useEffect(() => {
+    if (!agentMenuOpen) return;
+    const onGlobalClick = () => setAgentMenuOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAgentMenuOpen(false);
+    };
+    window.addEventListener("click", onGlobalClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", onGlobalClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [agentMenuOpen]);
 
   const updateActiveSessionTabs = useCallback(
     (updater: (session: WorktreeSessionState) => WorktreeSessionState) => {
@@ -1641,26 +1713,139 @@ export const App: React.FC = () => {
               <span className="kbd-hint">{formatShortcut("toggle-diff", platform)}</span>
             </button>
           )}
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => void handleCopyWalkthroughPrompt()}
-            title={`Copy prompt for your coding agent to drive an interactive walkthrough (${formatShortcut("copy-walkthrough-prompt", platform)})`}
-          >
-            <IconWalkthrough size={13} />
-            <span>Walkthrough</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => setExportModalOpen(true)}
-            title={`Preview & Export Feedback Prompt (${formatShortcut("export-prompt-preview", platform)})`}
-          >
-            <IconExport size={13} />
-            <span>Export Prompt{openWtAnnotationCount > 0 ? ` (${openWtAnnotationCount})` : ""}</span>
-          </button>
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAgentMenuOpen((v) => !v);
+              }}
+              title="Copy prompts to connect a coding agent (Walkthrough or Live Review)"
+              style={{ background: agentMenuOpen ? "var(--wash-hi)" : undefined }}
+            >
+              <IconWalkthrough size={13} />
+              <span>Agent</span>
+              <span style={{ color: "var(--dim)", fontSize: "10px" }}>▾</span>
+            </button>
+            {agentMenuOpen && (
+              <div
+                role="menu"
+                aria-label="Coding Agent Workflows"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  right: 0,
+                  zIndex: 1200,
+                  minWidth: "270px",
+                  background: "var(--wash)",
+                  border: "1px solid var(--border-strong)",
+                  borderRadius: "8px",
+                  boxShadow: "var(--shadow-popup)",
+                  padding: "4px",
+                  fontFamily: "var(--ui-font)",
+                  fontSize: "12.5px",
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="ide2-project-menu-item"
+                  onClick={() => void handleCopyReviewPrompt()}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: "2px",
+                    width: "100%",
+                    padding: "6px 8px",
+                    borderRadius: "5px",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--ink)",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontWeight: 500 }}>Copy Live Review Prompt</span>
+                  <span style={{ fontSize: "11px", color: "var(--dim)" }}>
+                    Agent runs `ide2 review wait` (no copy/paste)
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="ide2-project-menu-item"
+                  onClick={() => void handleCopyWalkthroughPrompt()}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: "2px",
+                    width: "100%",
+                    padding: "6px 8px",
+                    borderRadius: "5px",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--ink)",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", width: "100%", justifyContent: "space-between" }}>
+                    <span style={{ fontWeight: 500 }}>Copy Walkthrough Prompt</span>
+                    <span className="kbd-hint">{formatShortcut("copy-walkthrough-prompt", platform)}</span>
+                  </span>
+                  <span style={{ fontSize: "11px", color: "var(--dim)" }}>
+                    Agent guides you top-down via `ide2 tour`
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+          {review?.awaitingUser ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                if (openWtAnnotationCount > 0) {
+                  void handleSendReviewFeedback();
+                } else {
+                  setExportModalOpen(true);
+                }
+              }}
+              title="Send open annotations directly to the waiting coding agent (no copy/paste)"
+            >
+              <IconExport size={13} />
+              <span>
+                Send to Agent{openWtAnnotationCount > 0 ? ` (${openWtAnnotationCount})` : ""} →
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setExportModalOpen(true)}
+              title={`Preview & Export Feedback Prompt (${formatShortcut("export-prompt-preview", platform)})`}
+            >
+              <IconExport size={13} />
+              <span>Export Prompt{openWtAnnotationCount > 0 ? ` (${openWtAnnotationCount})` : ""}</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* 2a. Live Connected Agent Review Bar */}
+      {review && (
+        <ReviewSessionBar
+          review={review}
+          openAnnotationCount={openWtAnnotationCount}
+          onSendFeedback={() => handleSendReviewFeedback()}
+          onApprove={() => handleApproveReview()}
+          onCancel={() => handleCancelReview()}
+        />
+      )}
 
       {/* 2b. Active Walkthrough Step Outline Bar */}
       {walkthrough && walkthrough.steps.length > 0 && viewedWalkthroughStep && (
@@ -2011,6 +2196,7 @@ export const App: React.FC = () => {
               worktree={activeWorktree}
               annotations={worktreeAnnotations}
               platform={platform}
+              reviewConnected={Boolean(review?.awaitingUser)}
               onJumpToAnnotation={(ann) => {
                 if (ann.filePath) {
                   void openFileInWorktree(ann.worktreePath, ann.filePath, {
@@ -2037,6 +2223,7 @@ export const App: React.FC = () => {
                 await window.ide2.deleteAnnotation(id);
               }}
               onCopyFeedbackPrompt={(opts) => handleCopyPromptQuick(opts)}
+              onSendToAgent={(opts) => handleSendReviewFeedback(opts)}
               onClose={() => setRightAnnotationsOpen(false)}
             />
           </div>
@@ -2124,8 +2311,13 @@ export const App: React.FC = () => {
         worktree={activeWorktree}
         annotations={worktreeAnnotations}
         platform={platform}
+        reviewConnected={Boolean(review?.awaitingUser)}
         onCopyFeedbackPrompt={async (opts) => {
           await handleCopyPromptQuick(opts);
+          setExportModalOpen(false);
+        }}
+        onSendToAgent={async (opts) => {
+          await handleSendReviewFeedback(opts);
           setExportModalOpen(false);
         }}
         onClose={() => setExportModalOpen(false)}

@@ -24,10 +24,14 @@ function printHelp() {
       "  ide2 --diff                   Launch directly in Branch Diff Review mode",
       "  ide2 --worktree api-v2        Focus a named worktree on launch",
       "  ide2 --export                 Print current worktree's Markdown Feedback Prompt to stdout",
+      "  ide2 review wait              Wait for live review feedback from ide2 (no copy/paste)",
       "  ide2 tour --help              Drive interactive step-by-step codebase walkthroughs",
+      "  ide2 install-skill            Install the unified ide2 agent skill (tour + live review)",
       "",
       "Subcommands:",
-      "  tour                          Agent-driven codebase walkthrough controls (`ide2 tour --help`)",
+      "  review                        Live zero-copy-paste review loop (`ide2 review --help`)",
+      "  tour                          Agent-driven codebase walkthroughs (`ide2 tour --help`)",
+      "  install-skill                 Install unified SKILL.md for skill-aware coding agents",
       "",
       "Options:",
       "  -d, --diff            Open in Diff Review mode",
@@ -87,20 +91,26 @@ function parseCliArgs(argv) {
 
 const rawArgs = process.argv.slice(2);
 
-if (rawArgs[0] === "tour" || rawArgs[0] === "walkthrough") {
+if (
+  rawArgs[0] === "tour" ||
+  rawArgs[0] === "walkthrough" ||
+  rawArgs[0] === "review" ||
+  rawArgs[0] === "install-skill"
+) {
   const tourEntry = resolve(APP_ROOT, "dist/cli/tour.cjs");
   if (!existsSync(tourEntry)) {
     process.stderr.write("ide2: build artifacts missing. Run `bun run build` in ide2 first.\n");
     process.exit(1);
   }
-  const { runCliTour } = require(tourEntry);
-  Promise.resolve(
-    runCliTour({
-      cwd: process.cwd(),
-      appRoot: APP_ROOT,
-      argv: rawArgs.slice(1),
-    }),
-  )
+  const { runCliTour, runCliReview, runCliInstallSkill } = require(tourEntry);
+  const sub = rawArgs[0];
+  const promise =
+    sub === "review"
+      ? runCliReview({ cwd: process.cwd(), appRoot: APP_ROOT, argv: rawArgs.slice(1) })
+      : sub === "install-skill"
+        ? runCliInstallSkill({ cwd: process.cwd(), argv: rawArgs.slice(1) })
+        : runCliTour({ cwd: process.cwd(), appRoot: APP_ROOT, argv: rawArgs.slice(1) });
+  Promise.resolve(promise)
     .then((output) => {
       if (output) {
         process.stdout.write(output);
@@ -108,7 +118,7 @@ if (rawArgs[0] === "tour" || rawArgs[0] === "walkthrough") {
       process.exit(0);
     })
     .catch((err) => {
-      process.stderr.write(`ide2 tour failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`ide2 ${sub} failed: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     });
 } else {

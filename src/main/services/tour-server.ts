@@ -19,6 +19,8 @@ import { join, isAbsolute, relative, resolve, sep } from "node:path";
 import { toPosixPath } from "../../shared/guard.js";
 import type {
   DiffScope,
+  ReviewSessionState,
+  ReviewUserAction,
   WalkthroughState,
   WalkthroughStep,
   WalkthroughTargetKind,
@@ -32,6 +34,7 @@ export interface TourHostAdapter {
   ensureRepoWindow(params: {
     cwd: string;
     worktree?: string;
+    diff?: boolean;
     focusWindow: boolean;
   }): Promise<{
     repoCommonDir: string;
@@ -40,6 +43,7 @@ export interface TourHostAdapter {
     worktrees: WorktreeInfo[];
   }>;
   broadcastWalkthrough(repoCommonDir: string, state: WalkthroughState | null): void;
+  broadcastReview?: (repoCommonDir: string, state: ReviewSessionState | null) => void;
 }
 
 export interface TourStartParams {
@@ -103,10 +107,63 @@ interface RepoTourSession {
   bufferedResponse: WalkthroughUserResponse | null;
 }
 
+export interface ReviewWaitParams {
+  cwd: string;
+  worktree?: string;
+  label?: string;
+  diff?: boolean;
+  resolveOnSend?: boolean;
+  waitTimeoutMs?: number;
+}
+
+export interface ReviewWaitRpcResult {
+  status: "responded" | "waiting" | "idle";
+  sessionId: string;
+  round: number;
+  action?: ReviewUserAction;
+  count?: number;
+  markdown?: string;
+}
+
+interface PendingReviewWaiter {
+  resolve: (res: ReviewWaitRpcResult) => void;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+interface BufferedReviewResponse {
+  action: ReviewUserAction;
+  round: number;
+  count: number;
+  markdown?: string;
+}
+
+interface RepoReviewSession {
+  sessionId: string;
+  repoCommonDir: string;
+  worktreePath: string;
+  label?: string;
+  awaitingUser: boolean;
+  agentWorking: boolean;
+  round: number;
+  resolveOnSend: boolean;
+  updatedAt: number;
+  waiter: PendingReviewWaiter | null;
+  bufferedResponse: BufferedReviewResponse | null;
+}
+
 export interface TourRpcRequest {
   id: string;
   token: string;
-  method: "ping" | "tour.start" | "tour.step" | "tour.wait" | "tour.status" | "tour.end";
+  method:
+    | "ping"
+    | "tour.start"
+    | "tour.step"
+    | "tour.wait"
+    | "tour.status"
+    | "tour.end"
+    | "review.wait"
+    | "review.status"
+    | "review.end";
   params?: Record<string, unknown>;
 }
 
@@ -283,6 +340,7 @@ export class TourServer {
   private readonly ipcDir: string;
   private readonly secretToken: string;
   private readonly sessions = new Map<string, RepoTourSession>();
+  private readonly reviewSessions = new Map<string, RepoReviewSession>();
   private readonly inFlightFileReqs = new Set<string>();
   private server: Server | null = null;
   private ipcWatcher: FSWatcher | null = null;
@@ -420,6 +478,20 @@ export class TourServer {
     }
     this.sessions.clear();
 
+    for (const rev of this.reviewSessions.values()) {
+      if (rev.waiter) {
+        if (rev.waiter.timer) clearTimeout(rev.waiter.timer);
+        rev.waiter.resolve({
+          status: "responded",
+          sessionId: rev.sessionId,
+          round: rev.round,
+          action: "cancel",
+        });
+        rev.waiter = null;
+      }
+    }
+    this.reviewSessions.clear();
+
     if (this.server) {
       const srv = this.server;
       this.server = null;
@@ -492,6 +564,84 @@ export class TourServer {
       stepId: session.activeStepId,
       action: "stop",
     });
+  }
+
+  getReviewState(repoCommonDir: string): ReviewSessionState | null {
+    const canon = existsSync(repoCommonDir) ? realpathSync(repoCommonDir) : repoCommonDir;
+    const session = this.reviewSessions.get(canon);
+    if (!session) return null;
+    if (
+      session.bufferedResponse &&
+      (session.bufferedResponse.action === "approve" || session.bufferedResponse.action === "cancel")
+    ) {
+      return null;
+    }
+    return this.toPublicReviewState(session);
+  }
+
+  respondReviewFromUser(
+    repoCommonDir: string,
+    payload: { action: ReviewUserAction; markdown?: string; count: number },
+  ): boolean {
+    const canon = existsSync(repoCommonDir) ? realpathSync(repoCommonDir) : repoCommonDir;
+    const session = this.reviewSessions.get(canon);
+    if (!session) return false;
+
+    const nextRound = payload.action === "feedback" ? session.round + 1 : session.round;
+    session.round = nextRound;
+    session.updatedAt = Date.now();
+
+    const result: ReviewWaitRpcResult = {
+      status: "responded",
+      sessionId: session.sessionId,
+      round: nextRound,
+      action: payload.action,
+      count: payload.count,
+      markdown: payload.markdown,
+    };
+
+    const hadWaiter = Boolean(session.waiter);
+    if (session.waiter) {
+      const w = session.waiter;
+      session.waiter = null;
+      if (w.timer) clearTimeout(w.timer);
+      w.resolve(result);
+    } else {
+      session.bufferedResponse = {
+        action: payload.action,
+        round: nextRound,
+        count: payload.count,
+        markdown: payload.markdown,
+      };
+    }
+
+    if (payload.action === "approve" || payload.action === "cancel") {
+      session.awaitingUser = false;
+      session.agentWorking = false;
+      if (hadWaiter) {
+        this.reviewSessions.delete(canon);
+      }
+      this.host.broadcastReview?.(canon, null);
+    } else {
+      session.awaitingUser = false;
+      session.agentWorking = true;
+      this.host.broadcastReview?.(canon, this.toPublicReviewState(session));
+    }
+    return true;
+  }
+
+  private toPublicReviewState(session: RepoReviewSession): ReviewSessionState {
+    return {
+      sessionId: session.sessionId,
+      repoCommonDir: session.repoCommonDir,
+      worktreePath: session.worktreePath,
+      label: session.label,
+      awaitingUser: session.awaitingUser,
+      agentWorking: session.agentWorking,
+      round: session.round,
+      resolveOnSend: session.resolveOnSend,
+      updatedAt: session.updatedAt,
+    };
   }
 
   private toPublicState(session: RepoTourSession): WalkthroughState {
@@ -629,6 +779,21 @@ export class TourServer {
         case "tour.end": {
           const cwd = String((req.params ?? {}).cwd ?? process.cwd());
           const result = await this.handleEnd(cwd);
+          return { id: req.id, ok: true, result };
+        }
+        case "review.wait": {
+          const p = (req.params ?? {}) as unknown as ReviewWaitParams;
+          const result = await this.handleReviewWait(p, conn);
+          return { id: req.id, ok: true, result };
+        }
+        case "review.status": {
+          const cwd = String((req.params ?? {}).cwd ?? process.cwd());
+          const result = await this.handleReviewStatus(cwd);
+          return { id: req.id, ok: true, result };
+        }
+        case "review.end": {
+          const cwd = String((req.params ?? {}).cwd ?? process.cwd());
+          const result = await this.handleReviewEnd(cwd);
           return { id: req.id, ok: true, result };
         }
         default: {
@@ -924,6 +1089,160 @@ export class TourServer {
     }
     this.sessions.delete(repoInfo.repoCommonDir);
     this.host.broadcastWalkthrough(repoInfo.repoCommonDir, null);
+    return { ended: true };
+  }
+
+  private async handleReviewWait(
+    params: ReviewWaitParams,
+    conn?: Socket,
+  ): Promise<ReviewWaitRpcResult> {
+    const existingAny = this.reviewSessions.size > 0;
+    const repoInfo = await this.host.ensureRepoWindow({
+      cwd: params.cwd,
+      worktree: params.worktree,
+      diff: params.diff,
+      focusWindow: !existingAny,
+    });
+
+    let session = this.reviewSessions.get(repoInfo.repoCommonDir);
+    if (!session) {
+      session = {
+        sessionId: randomBytes(8).toString("hex"),
+        repoCommonDir: repoInfo.repoCommonDir,
+        worktreePath: repoInfo.worktreePath,
+        label: params.label,
+        awaitingUser: true,
+        agentWorking: false,
+        round: 0,
+        resolveOnSend: params.resolveOnSend !== false,
+        updatedAt: Date.now(),
+        waiter: null,
+        bufferedResponse: null,
+      };
+      this.reviewSessions.set(repoInfo.repoCommonDir, session);
+    } else {
+      if (session.bufferedResponse) {
+        const buffered = session.bufferedResponse;
+        session.bufferedResponse = null;
+        if (buffered.action === "approve" || buffered.action === "cancel") {
+          this.reviewSessions.delete(repoInfo.repoCommonDir);
+          this.host.broadcastReview?.(repoInfo.repoCommonDir, null);
+        }
+        return {
+          status: "responded",
+          sessionId: session.sessionId,
+          round: buffered.round,
+          action: buffered.action,
+          count: buffered.count,
+          markdown: buffered.markdown,
+        };
+      }
+
+      if (session.waiter) {
+        const prev = session.waiter;
+        session.waiter = null;
+        if (prev.timer) clearTimeout(prev.timer);
+        prev.resolve({
+          status: "waiting",
+          sessionId: session.sessionId,
+          round: session.round,
+        });
+      }
+
+      session.worktreePath = repoInfo.worktreePath;
+      if (params.label !== undefined) session.label = params.label;
+      if (params.resolveOnSend !== undefined) session.resolveOnSend = params.resolveOnSend;
+      session.awaitingUser = true;
+      session.agentWorking = false;
+      session.updatedAt = Date.now();
+    }
+
+    this.host.broadcastReview?.(repoInfo.repoCommonDir, this.toPublicReviewState(session));
+
+    const timeoutMs = params.waitTimeoutMs ?? 90_000;
+    return new Promise<ReviewWaitRpcResult>((resolveWait) => {
+      const waiter: PendingReviewWaiter = {
+        resolve: resolveWait,
+      };
+
+      if (timeoutMs > 0) {
+        waiter.timer = setTimeout(() => {
+          if (session.waiter === waiter) {
+            session.waiter = null;
+          }
+          resolveWait({
+            status: "waiting",
+            sessionId: session.sessionId,
+            round: session.round,
+          });
+        }, timeoutMs);
+      }
+
+      if (conn) {
+        conn.once("close", () => {
+          if (session.waiter === waiter) {
+            if (waiter.timer) clearTimeout(waiter.timer);
+            session.waiter = null;
+          }
+        });
+      }
+
+      session.waiter = waiter;
+    });
+  }
+
+  private async handleReviewStatus(cwd: string): Promise<{
+    active: boolean;
+    sessionId?: string;
+    worktreePath?: string;
+    awaitingUser: boolean;
+    agentWorking: boolean;
+    round: number;
+  }> {
+    const repoInfo = await this.host.ensureRepoWindow({
+      cwd,
+      focusWindow: false,
+    });
+    const session = this.reviewSessions.get(repoInfo.repoCommonDir);
+    if (
+      !session ||
+      (session.bufferedResponse &&
+        (session.bufferedResponse.action === "approve" || session.bufferedResponse.action === "cancel"))
+    ) {
+      return { active: false, awaitingUser: false, agentWorking: false, round: 0 };
+    }
+    return {
+      active: true,
+      sessionId: session.sessionId,
+      worktreePath: session.worktreePath,
+      awaitingUser: session.awaitingUser,
+      agentWorking: session.agentWorking,
+      round: session.round,
+    };
+  }
+
+  private async handleReviewEnd(cwd: string): Promise<{ ended: boolean }> {
+    const repoInfo = await this.host.ensureRepoWindow({
+      cwd,
+      focusWindow: false,
+    });
+    const session = this.reviewSessions.get(repoInfo.repoCommonDir);
+    if (!session) {
+      return { ended: false };
+    }
+    if (session.waiter) {
+      const w = session.waiter;
+      session.waiter = null;
+      if (w.timer) clearTimeout(w.timer);
+      w.resolve({
+        status: "responded",
+        sessionId: session.sessionId,
+        round: session.round,
+        action: "cancel",
+      });
+    }
+    this.reviewSessions.delete(repoInfo.repoCommonDir);
+    this.host.broadcastReview?.(repoInfo.repoCommonDir, null);
     return { ended: true };
   }
 }

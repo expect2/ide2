@@ -18,7 +18,10 @@ import { resolveRepoContext, WorktreeService } from "./services/git.js";
 import { RecentProjectsStore } from "./services/recent-projects.js";
 import { TourServer } from "./services/tour-server.js";
 import { MultiWorktreeWatcher } from "./services/watcher.js";
-import { buildWalkthroughAgentPrompt } from "../shared/walkthrough-prompt.js";
+import {
+  buildReviewAgentPrompt,
+  buildWalkthroughAgentPrompt,
+} from "../shared/walkthrough-prompt.js";
 import type {
   CodeSymbol,
   CreateAnnotationInput,
@@ -28,6 +31,7 @@ import type {
   FindInPathQuery,
   LaunchContext,
   OpenProjectResult,
+  ReviewUserResponse,
   TokenSpan,
   UpdateAnnotationInput,
   WalkthroughUserResponse,
@@ -139,16 +143,16 @@ const recentProjects = new RecentProjectsStore();
 let openProjectDialogInFlight = false;
 
 const tourServer = new TourServer({
-  ensureRepoWindow: async ({ cwd, worktree, focusWindow }) => {
+  ensureRepoWindow: async ({ cwd, worktree, diff, focusWindow }) => {
     const flags: ParsedProcessFlags = {
       cwd,
       target: cwd,
-      diff: false,
+      diff: Boolean(diff),
       worktree,
     };
     const opened = await openIdeWindow(flags, undefined, {
       focusOnReuse: focusWindow,
-      suppressCliOpenEvent: true,
+      suppressCliOpenEvent: !diff,
     });
     const { session, launchContext } = await getOrCreateRepoSession(flags);
     const cachedWts = session.git.listCachedWorktrees();
@@ -173,6 +177,15 @@ const tourServer = new TourServer({
       broadcastToSession(session, {
         type: "walkthrough-updated",
         walkthrough: state,
+      });
+    }
+  },
+  broadcastReview: (repoCommonDir, state) => {
+    const session = sessionsByCommonDir.get(repoCommonDir);
+    if (session) {
+      broadcastToSession(session, {
+        type: "review-updated",
+        review: state,
       });
     }
   },
@@ -454,6 +467,14 @@ function buildAppMenu(): void {
             clipboard.writeText(buildWalkthroughAgentPrompt(bound?.session.context.repoName));
           },
         },
+        {
+          label: "Copy Live Review Prompt for Agent",
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            const bound = win ? sessionByWindowId.get(win.id) : undefined;
+            clipboard.writeText(buildReviewAgentPrompt(bound?.session.context.repoName));
+          },
+        },
         { type: "separator" },
         { role: "minimize" },
         { role: "zoom" },
@@ -651,6 +672,7 @@ function registerIpcHandlers(): void {
       worktrees,
       annotations,
       walkthrough: tourServer.getState(session.context.repoCommonDir),
+      review: tourServer.getReviewState(session.context.repoCommonDir),
     };
   });
 
@@ -942,6 +964,57 @@ function registerIpcHandlers(): void {
   ipcMain.handle("ide2:getWalkthroughAgentPrompt", (evt) => {
     const { session } = getWindowSession(evt.sender);
     return buildWalkthroughAgentPrompt(session.context.repoName);
+  });
+
+  ipcMain.handle("ide2:getReviewAgentPrompt", (evt) => {
+    const { session } = getWindowSession(evt.sender);
+    return buildReviewAgentPrompt(session.context.repoName);
+  });
+
+  ipcMain.handle("ide2:sendReviewResponse", async (evt, response: ReviewUserResponse) => {
+    const { session } = getWindowSession(evt.sender);
+    if (response.action === "approve" || response.action === "cancel") {
+      const sent = tourServer.respondReviewFromUser(session.context.repoCommonDir, {
+        action: response.action,
+        count: 0,
+      });
+      return { sent, count: 0 };
+    }
+
+    const safeWt = assertRegisteredWorktree(session, response.worktreePath);
+    const wts = await session.git.discoverWorktrees(session.context.initialWorktreePath);
+    const wt = wts.find((w) => w.path === safeWt) ?? wts[0];
+    if (!wt) {
+      return { sent: false, count: 0 };
+    }
+
+    const reviewState = tourServer.getReviewState(session.context.repoCommonDir);
+    const shouldResolve = response.resolveAfterSend ?? reviewState?.resolveOnSend ?? true;
+
+    const compiled = await session.annotations.compilePrompt(wt, {
+      worktreePath: safeWt,
+      includeOutdated: response.includeOutdated,
+      resolveAfterExport: shouldResolve,
+    });
+    if (compiled.count === 0 || !compiled.markdown) {
+      return { sent: false, count: 0 };
+    }
+
+    if (shouldResolve) {
+      const all = await session.annotations.list();
+      broadcastToSession(session, {
+        type: "annotations-updated",
+        worktreePath: wt.path,
+        annotations: all,
+      });
+    }
+
+    const sent = tourServer.respondReviewFromUser(session.context.repoCommonDir, {
+      action: "feedback",
+      markdown: compiled.markdown,
+      count: compiled.count,
+    });
+    return { sent, count: compiled.count };
   });
 }
 

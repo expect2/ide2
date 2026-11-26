@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { runCliTour, sendTourRpc } from "../src/cli/tour.js";
+import { runCliInstallSkill, runCliReview, runCliTour, sendTourRpc } from "../src/cli/tour.js";
 import { TourServer } from "../src/main/services/tour-server.js";
-import type { WalkthroughState } from "../src/shared/protocol.js";
+import type { ReviewSessionState, WalkthroughState } from "../src/shared/protocol.js";
 
 const APP_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const IDE2_BIN = resolve(APP_ROOT, "bin/ide2.mjs");
@@ -84,16 +84,52 @@ describe("Agent-Driven Codebase Walkthrough (`ide2 tour`)", () => {
     expect(installOut).toContain(skillFile);
     expect(existsSync(skillFile)).toBe(true);
     const skillContent = readFileSync(skillFile, "utf8");
-    expect(skillContent).toContain("name: ide2-tour");
+    expect(skillContent).toContain("name: ide2");
     expect(skillContent).toContain("ide2 tour step");
+    expect(skillContent).toContain("ide2 review wait");
 
-    // Verify subprocess routing via `node bin/ide2.mjs walkthrough --help`
+    // Top-level `ide2 install-skill --dir ...` writes the same unified skill
+    const topSkillDir = join(tmp, "top-skill");
+    const topInstallOut = await runCliInstallSkill({
+      cwd: APP_ROOT,
+      argv: ["--dir", topSkillDir],
+    });
+    expect(topInstallOut).toContain(join(topSkillDir, "SKILL.md"));
+    expect(readFileSync(join(topSkillDir, "SKILL.md"), "utf8")).toBe(skillContent);
+
+    // Verify `ide2 review --help` & `ide2 review prompt`
+    const reviewHelpOut = await runCliReview({
+      cwd: APP_ROOT,
+      appRoot: APP_ROOT,
+      argv: ["--help"],
+      autoLaunch: false,
+    });
+    expect(reviewHelpOut).toContain("ide2 review — receive live code review feedback");
+    expect(reviewHelpOut).toContain("ACTION: feedback");
+    expect(reviewHelpOut).toContain("ACTION: approved");
+
+    const reviewPromptOut = await runCliReview({
+      cwd: APP_ROOT,
+      appRoot: APP_ROOT,
+      argv: ["prompt"],
+      autoLaunch: false,
+    });
+    expect(reviewPromptOut).toContain("ide2 review wait");
+
+    // Verify subprocess routing via `node bin/ide2.mjs walkthrough --help` and `review --help`
     const sub = spawnSync(process.execPath, [IDE2_BIN, "walkthrough", "--help"], {
       cwd: APP_ROOT,
       encoding: "utf8",
     });
     expect(sub.status).toBe(0);
     expect(sub.stdout).toBe(helpOut);
+
+    const subReview = spawnSync(process.execPath, [IDE2_BIN, "review", "--help"], {
+      cwd: APP_ROOT,
+      encoding: "utf8",
+    });
+    expect(subReview.status).toBe(0);
+    expect(subReview.stdout).toBe(reviewHelpOut);
   });
 
   it("drives synchronous step-by-step tours (overview -> folder -> range + timeout/wait -> diff final) and enforces security", async () => {
@@ -299,5 +335,149 @@ describe("Agent-Driven Codebase Walkthrough (`ide2 tour`)", () => {
       sendTourRpc(server.getEndpointPaths(), "wrong-secret-token", "ping"),
     ).rejects.toThrow(/Unauthorized token/);
     expect(broadcasts.length).toBeGreaterThan(0);
+  });
+
+  it("drives zero-copy-paste live review loop (`ide2 review wait` -> feedback -> timeout + buffered approve -> status/end)", async () => {
+    const root = makeShortTempDir("ide2-rev-");
+    const runDir = join(root, "run");
+    const repoDir = join(root, "repo");
+    mkdirSync(repoDir, { recursive: true });
+
+    git(repoDir, ["init", "-b", "main"]);
+    git(repoDir, ["config", "user.email", "test@example.com"]);
+    git(repoDir, ["config", "user.name", "Review Tester"]);
+    writeFileSync(join(repoDir, "app.ts"), "export const ok = true;\n", "utf8");
+    git(repoDir, ["add", "."]);
+    git(repoDir, ["commit", "-m", "init"]);
+
+    const canonRepo = realpathSync(repoDir);
+    const canonCommonDir = realpathSync(join(canonRepo, ".git"));
+
+    const reviewBroadcasts: Array<ReviewSessionState | null> = [];
+    const seenDiffFlags: Array<boolean | undefined> = [];
+    const server = new TourServer(
+      {
+        ensureRepoWindow: async (params) => {
+          seenDiffFlags.push(params.diff);
+          return {
+            repoCommonDir: canonCommonDir,
+            repoName: "repo",
+            worktreePath: canonRepo,
+            worktrees: [],
+          };
+        },
+        broadcastWalkthrough: () => {},
+        broadcastReview: (_commonDir, state) => {
+          reviewBroadcasts.push(state ? structuredClone(state) : null);
+        },
+      },
+      runDir,
+    );
+    activeServers.push(server);
+    await server.listen();
+
+    // 1. Agent calls `ide2 review wait --diff --label "Auth fixes"` and blocks until developer clicks Send to Agent
+    const round1Promise = runCliReview({
+      cwd: canonRepo,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["wait", "--diff", "--label", "Auth fixes"],
+    });
+
+    const reviewState1 = await waitFor(() => {
+      const s = server.getReviewState(canonCommonDir);
+      return s && s.awaitingUser ? s : null;
+    });
+    expect(reviewState1.label).toBe("Auth fixes");
+    expect(reviewState1.agentWorking).toBe(false);
+    expect(seenDiffFlags).toContain(true);
+
+    const feedbackMd = "# Code Review Feedback — `repo`\n\n## 1. `app.ts:1`\nAdd strict return type.";
+    expect(
+      server.respondReviewFromUser(canonCommonDir, {
+        action: "feedback",
+        count: 2,
+        markdown: feedbackMd,
+      }),
+    ).toBe(true);
+
+    const round1Out = await round1Promise;
+    expect(round1Out).toBe(`ACTION: feedback\nROUND: 1\nANNOTATIONS: 2\n\n${feedbackMd}\n`);
+
+    // Immediately transitions to `agentWorking: true` while agent implements the feedback
+    const workingState = server.getReviewState(canonCommonDir);
+    expect(workingState?.agentWorking).toBe(true);
+    expect(workingState?.awaitingUser).toBe(false);
+    expect(workingState?.round).toBe(1);
+
+    // 2. Agent returns for round 2 with short `--wait-timeout` -> returns `ACTION: waiting`
+    const round2TimeoutOut = await runCliReview({
+      cwd: canonRepo,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["wait", "--wait-timeout", "0.06"],
+    });
+    expect(round2TimeoutOut).toContain("ACTION: waiting");
+    expect(round2TimeoutOut).toContain("ROUND: 1");
+    expect(server.getReviewState(canonCommonDir)?.awaitingUser).toBe(true);
+
+    // Status reflects active waiting session
+    const statusJson = JSON.parse(
+      await runCliReview({
+        cwd: canonRepo,
+        appRoot: APP_ROOT,
+        runDir,
+        autoLaunch: false,
+        argv: ["status"],
+      }),
+    ) as { active: boolean; awaitingUser: boolean; round: number };
+    expect(statusJson.active).toBe(true);
+    expect(statusJson.awaitingUser).toBe(true);
+    expect(statusJson.round).toBe(1);
+
+    // 3. Developer clicks Approve right BEFORE agent resumes `ide2 review wait` -> buffered without losing click!
+    expect(
+      server.respondReviewFromUser(canonCommonDir, {
+        action: "approve",
+        count: 0,
+      }),
+    ).toBe(true);
+    // UI state clears immediately so the green bar disappears
+    expect(server.getReviewState(canonCommonDir)).toBeNull();
+
+    // Agent calls `ide2 review wait` and receives the buffered approval cleanly
+    const approvedOut = await runCliReview({
+      cwd: canonRepo,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["wait", "--wait-timeout", "1"],
+    });
+    expect(approvedOut).toBe("ACTION: approved\nROUND: 1\n");
+    expect(server.getReviewState(canonCommonDir)).toBeNull();
+
+    // 4. `ide2 review end` closes an active waiting session cleanly
+    const waitToEndPromise = runCliReview({
+      cwd: canonRepo,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["wait", "--wait-timeout", "5"],
+    });
+    await waitFor(() => server.getReviewState(canonCommonDir));
+
+    const endOut = await runCliReview({
+      cwd: canonRepo,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["end"],
+    });
+    expect(endOut).toBe("ACTION: ended\n");
+    expect(await waitToEndPromise).toBe("ACTION: cancel\nROUND: 0\n");
+    expect(server.getReviewState(canonCommonDir)).toBeNull();
+    expect(reviewBroadcasts.length).toBeGreaterThan(0);
   });
 });

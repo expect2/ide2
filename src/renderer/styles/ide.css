@@ -2106,3 +2106,51 @@ select:focus-visible {
   border-left-color: var(--sky);
   background: rgba(61, 107, 255, 0.08);
 }
+
+/* ============================================================================
+   Live Agent Review Session Bar (`ide2 review wait`)
+   ============================================================================ */
+
+.review-live-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 12px;
+  background: #1a2320;
+  border-bottom: 1px solid rgba(109, 255, 166, 0.35);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.review-live-bar.is-working {
+  background: #23211a;
+  border-bottom-color: rgba(255, 228, 92, 0.35);
+}
+
+.review-live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.review-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--safe);
+  box-shadow: 0 0 8px rgba(109, 255, 166, 0.7);
+  flex-shrink: 0;
+}
+
+.review-live-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}

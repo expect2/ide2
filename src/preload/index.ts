@@ -5,6 +5,7 @@ import type {
   ExportPromptOptions,
   FindInPathQuery,
   Ide2Bridge,
+  ReviewUserResponse,
   UpdateAnnotationInput,
   WalkthroughUserResponse,
   WorkspaceEvent,
@@ -47,6 +48,9 @@ const bridge: Ide2Bridge = {
     ipcRenderer.invoke("ide2:respondWalkthrough", response),
   endWalkthrough: () => ipcRenderer.invoke("ide2:endWalkthrough"),
   getWalkthroughAgentPrompt: () => ipcRenderer.invoke("ide2:getWalkthroughAgentPrompt"),
+  sendReviewResponse: (response: ReviewUserResponse) =>
+    ipcRenderer.invoke("ide2:sendReviewResponse", response),
+  getReviewAgentPrompt: () => ipcRenderer.invoke("ide2:getReviewAgentPrompt"),
   onEvent: (listener: (event: WorkspaceEvent) => void) => {
     const handler = (_evt: Electron.IpcRendererEvent, payload: WorkspaceEvent) => {
       listener(payload);

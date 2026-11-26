@@ -13,8 +13,14 @@ import { createRequire } from "node:module";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { TourRpcRequest, TourRpcResponse, TourStepRpcResult } from "../main/services/tour-server.js";
+import type {
+  ReviewWaitRpcResult,
+  TourRpcRequest,
+  TourRpcResponse,
+  TourStepRpcResult,
+} from "../main/services/tour-server.js";
 import {
+  buildReviewAgentPrompt,
   buildWalkthroughAgentPrompt,
   buildWalkthroughSkillMarkdown,
   getTourEndpointPaths,
@@ -520,15 +526,11 @@ export async function runCliTour(options: RunCliTourOptions): Promise<string> {
   }
 
   if (parsed.subcommand === "install-skill") {
-    const baseDir = parsed.skillDir
-      ? resolve(options.cwd, parsed.skillDir)
-      : parsed.claudeSkill
-        ? join(homedir(), ".claude", "skills", "ide2-tour")
-        : join(homedir(), ".agents", "skills", "ide2-tour");
-    mkdirSync(baseDir, { recursive: true });
-    const skillPath = join(baseDir, "SKILL.md");
-    writeFileSync(skillPath, buildWalkthroughSkillMarkdown(), "utf8");
-    return `Installed ide2-tour skill to ${skillPath}\n`;
+    return installUnifiedSkill({
+      cwd: options.cwd,
+      dir: parsed.skillDir,
+      claude: parsed.claudeSkill,
+    });
   }
 
   const conn = await ensureDaemonRunning({
@@ -620,4 +622,209 @@ export async function runCliTour(options: RunCliTourOptions): Promise<string> {
 
   await sendTourRpc(conn.paths, conn.token, "tour.end", { cwd: options.cwd });
   return "ACTION: ended\n";
+}
+
+export function formatReviewHelp(): string {
+  return [
+    "ide2 review — receive live code review feedback directly from ide2 (no copy/paste)",
+    "",
+    "Usage:",
+    "  ide2 review wait [--worktree <name>] [--label <text>] [--diff] [--resolve] [--wait-timeout <sec>]",
+    "  ide2 review status",
+    "  ide2 review end",
+    "  ide2 review prompt",
+    "  ide2 review install-skill [--dir <path>] [--claude]",
+    "",
+    "Options:",
+    "  -w, --worktree <name>     Target worktree name, branch, or path",
+    "      --label <text>        Optional label shown in ide2's review bar (e.g. \"Auth refactor\")",
+    "  -d, --diff                Open ide2 directly in Git Diff view",
+    "      --resolve             Mark sent annotations as resolved automatically (default: on)",
+    "      --no-resolve          Keep sent annotations open in ide2 after sending",
+    "      --wait-timeout <sec>  Max seconds to block before returning ACTION: waiting (default: 90, 0 = infinite)",
+    "",
+    "Blocking Responses (printed to stdout):",
+    "  ACTION: feedback          Developer clicked 'Send to Agent →'; compiled Markdown follows immediately",
+    "  ACTION: approved          Developer clicked 'Approve ✓' — review complete",
+    "  ACTION: waiting           Developer is still reviewing — run `ide2 review wait` to continue waiting",
+    "  ACTION: cancel            Developer disconnected the review session",
+    "",
+  ].join("\n");
+}
+
+function installUnifiedSkill(options: {
+  cwd: string;
+  dir?: string;
+  claude?: boolean;
+}): string {
+  const baseDir = options.dir
+    ? resolve(options.cwd, options.dir)
+    : options.claude
+      ? join(homedir(), ".claude", "skills", "ide2")
+      : join(homedir(), ".agents", "skills", "ide2");
+  mkdirSync(baseDir, { recursive: true });
+  const skillPath = join(baseDir, "SKILL.md");
+  writeFileSync(skillPath, buildWalkthroughSkillMarkdown(), "utf8");
+  return `Installed ide2 agent skill (walkthrough + live review) to ${skillPath}\n`;
+}
+
+export async function runCliInstallSkill(options: {
+  cwd: string;
+  argv: readonly string[];
+}): Promise<string> {
+  let dir: string | undefined;
+  let claude = false;
+  for (let i = 0; i < options.argv.length; i += 1) {
+    const arg = options.argv[i]!;
+    if (arg === "--dir" && options.argv[i + 1] !== undefined) {
+      dir = options.argv[++i];
+    } else if (arg.startsWith("--dir=")) {
+      dir = arg.slice("--dir=".length);
+    } else if (arg === "--claude") {
+      claude = true;
+    } else if (arg === "-h" || arg === "--help") {
+      return [
+        "ide2 install-skill — install the unified ide2 agent skill (tour + live review)",
+        "",
+        "Usage:",
+        "  ide2 install-skill                    Install to ~/.agents/skills/ide2/SKILL.md",
+        "  ide2 install-skill --claude           Install to ~/.claude/skills/ide2/SKILL.md",
+        "  ide2 install-skill --dir <path>       Install to a custom skill directory",
+        "",
+      ].join("\n");
+    }
+  }
+  return installUnifiedSkill({ cwd: options.cwd, dir, claude });
+}
+
+function formatReviewResultOutput(res: ReviewWaitRpcResult): string {
+  if (res.status === "idle") {
+    return "ACTION: idle\n";
+  }
+  if (res.status === "waiting") {
+    return [
+      "ACTION: waiting",
+      `ROUND: ${res.round}`,
+      "HINT: User is still reviewing in ide2. Run `ide2 review wait` to continue waiting.",
+      "",
+    ].join("\n");
+  }
+  if (res.action === "approve") {
+    return `ACTION: approved\nROUND: ${res.round}\n`;
+  }
+  if (res.action === "cancel") {
+    return `ACTION: cancel\nROUND: ${res.round}\n`;
+  }
+  const header = [
+    "ACTION: feedback",
+    `ROUND: ${res.round}`,
+    `ANNOTATIONS: ${res.count ?? 0}`,
+  ].join("\n");
+  return res.markdown ? `${header}\n\n${res.markdown.trimEnd()}\n` : `${header}\n`;
+}
+
+export async function runCliReview(options: RunCliTourOptions): Promise<string> {
+  const first = options.argv[0];
+  if (!first || first === "-h" || first === "--help" || first === "help") {
+    return formatReviewHelp();
+  }
+
+  let sub: "wait" | "status" | "end" | "prompt" | "install-skill";
+  if (first === "wait" || first === "start") sub = "wait";
+  else if (first === "status") sub = "status";
+  else if (first === "end" || first === "stop" || first === "cancel") sub = "end";
+  else if (first === "prompt") sub = "prompt";
+  else if (first === "install-skill") sub = "install-skill";
+  else {
+    throw new Error(`Unknown review subcommand "${first}". Run \`ide2 review --help\`.`);
+  }
+
+  let worktree: string | undefined;
+  let label: string | undefined;
+  let diff = false;
+  let resolveOnSend = true;
+  let waitTimeoutSec = 90;
+  let skillDir: string | undefined;
+  let claudeSkill = false;
+
+  for (let i = 1; i < options.argv.length; i += 1) {
+    const arg = options.argv[i]!;
+    if (arg === "-h" || arg === "--help") {
+      return formatReviewHelp();
+    } else if ((arg === "-w" || arg === "--worktree") && options.argv[i + 1] !== undefined) {
+      worktree = options.argv[++i];
+    } else if (arg.startsWith("--worktree=")) {
+      worktree = arg.slice("--worktree=".length);
+    } else if (arg === "--label" && options.argv[i + 1] !== undefined) {
+      label = options.argv[++i];
+    } else if (arg.startsWith("--label=")) {
+      label = arg.slice("--label=".length);
+    } else if (arg === "-d" || arg === "--diff") {
+      diff = true;
+    } else if (arg === "--resolve") {
+      resolveOnSend = true;
+    } else if (arg === "--no-resolve") {
+      resolveOnSend = false;
+    } else if (arg === "--wait-timeout" && options.argv[i + 1] !== undefined) {
+      waitTimeoutSec = Number.parseFloat(options.argv[++i]!);
+    } else if (arg.startsWith("--wait-timeout=")) {
+      waitTimeoutSec = Number.parseFloat(arg.slice("--wait-timeout=".length));
+    } else if (arg === "--dir" && options.argv[i + 1] !== undefined) {
+      skillDir = options.argv[++i];
+    } else if (arg.startsWith("--dir=")) {
+      skillDir = arg.slice("--dir=".length);
+    } else if (arg === "--claude") {
+      claudeSkill = true;
+    }
+  }
+
+  if (sub === "prompt") {
+    return `${buildReviewAgentPrompt()}\n`;
+  }
+
+  if (sub === "install-skill") {
+    return installUnifiedSkill({ cwd: options.cwd, dir: skillDir, claude: claudeSkill });
+  }
+
+  const conn = await ensureDaemonRunning({
+    cwd: options.cwd,
+    appRoot: options.appRoot,
+    runDir: options.runDir,
+    autoLaunch: options.autoLaunch,
+  });
+
+  if (sub === "status") {
+    const res = await sendTourRpc<Record<string, unknown>>(
+      conn.paths,
+      conn.token,
+      "review.status",
+      { cwd: options.cwd },
+    );
+    return `${JSON.stringify(res, null, 2)}\n`;
+  }
+
+  if (sub === "end") {
+    await sendTourRpc(conn.paths, conn.token, "review.end", { cwd: options.cwd });
+    return "ACTION: ended\n";
+  }
+
+  const waitTimeoutMs =
+    Number.isFinite(waitTimeoutSec) && waitTimeoutSec >= 0
+      ? Math.round(waitTimeoutSec * 1000)
+      : 90_000;
+
+  const res = await sendTourRpc<ReviewWaitRpcResult>(
+    conn.paths,
+    conn.token,
+    "review.wait",
+    {
+      cwd: options.cwd,
+      worktree,
+      label,
+      diff,
+      resolveOnSend,
+      waitTimeoutMs,
+    },
+  );
+  return formatReviewResultOutput(res);
 }

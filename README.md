@@ -31,11 +31,18 @@ In the agentic era, producing code is no longer the bottleneck. Coding agents wr
 
 ## Key Features
 
+### Live Code Review Loop (`ide2 review`) — Zero Copy/Paste
+- Connect any coding agent directly to `ide2` over local authenticated IPC (automatically falls back to a filesystem mailbox inside no-network sandboxes).
+- Tell your agent to wait for your review (`ide2 review wait --diff`), or click **Agent ▾ → Copy Live Review Prompt** in the top bar (or install the unified skill once with `ide2 install-skill`).
+- While connected, `ide2` shows a live **Agent connected & waiting for review** bar and promotes **Send to Agent →** and **Approve ✓** buttons across the top bar, Annotations panel, and Export modal.
+- Annotate code, diffs, or Markdown specs as usual, then click **Send to Agent →** — compiled Markdown feedback is delivered straight to the agent's `stdout` (no clipboard needed), and `ide2` switches to *Agent addressing your feedback…* until the next round arrives or you click **Approve ✓**.
+- Works seamlessly alongside `Copy Prompt` (`⇧⌘C`) and `ide2 --export` whenever no agent is actively connected.
+
 ### Agent-Driven Codebase Walkthroughs (`ide2 tour`)
 - Ask **any** coding agent (Claude Code, Codex, Grok Build, Pi, Aider, etc.) to walk you through a repository or feature top-down.
 - The agent drives `ide2` **one step at a time** via `ide2 tour step` — moving from architecture overview → folders → files → spotlighted line ranges or diffs — and renders rich Markdown + Mermaid explanations right inside `ide2`.
 - Each step **waits synchronously** until you click **Next →** in `ide2` (or type a quick question/detour right on the callout card to steer the agent's next step!).
-- Click **Walkthrough** (`⇧⌘T` / `Ctrl+Shift+T`) in the top bar to copy a ready-to-paste prompt for your agent, or install the reusable skill once with `ide2 tour install-skill`.
+- Click **Agent ▾ → Copy Walkthrough Prompt** (`⇧⌘T` / `Ctrl+Shift+T`) in the top bar, or install the unified skill once with `ide2 install-skill` (`--claude` for `~/.claude/skills/ide2`).
 
 ### Multi-Worktree Git & Diffs
 - Automatically discovers all worktrees belonging to the opened repository (including `.claude/worktrees/*` and sibling checkouts) while excluding unrelated repos.
@@ -122,8 +129,10 @@ ide2 --base develop           # Override the base branch used for diffs
 ide2 --worktree api-v2        # Focus a specific worktree by name or path
 ide2 --export                 # Print the active worktree's Feedback Prompt to stdout
 ide2 --export --resolve       # Print the Feedback Prompt and mark annotations resolved
+ide2 review wait --diff       # Live review loop: receive annotations directly (no copy/paste)
 ide2 tour --help              # Agent-driven interactive codebase walkthrough commands
-ide2 tour install-skill       # Install the ide2-tour SKILL.md for skill-aware agents
+ide2 install-skill            # Install unified ide2 SKILL.md (~/.agents/skills/ide2)
+ide2 install-skill --claude   # Install unified ide2 SKILL.md (~/.claude/skills/ide2)
 ```
 
 | Flag | Description |
