@@ -887,6 +887,28 @@ export const App: React.FC = () => {
     [worktreeAnnotations],
   );
 
+  const handleSearchFilesMemo = useCallback(
+    (params: { worktreePath: string; query: string; allWorktrees: boolean }) =>
+      window.ide2.fuzzyFindFiles({ ...params, limit: 60 }),
+    [],
+  );
+
+  const handleSearchSymbolsMemo = useCallback(
+    (params: { worktreePath: string; query: string; allWorktrees: boolean }) =>
+      window.ide2.searchSymbols({ ...params, limit: 60 }),
+    [],
+  );
+
+  const handleFindInPathMemo = useCallback(
+    (q: FindInPathQuery) => window.ide2.findInPath(q),
+    [],
+  );
+
+  const handleLoadPreviewMemo = useCallback(
+    (wtPath: string, fp: string) => window.ide2.readFile(wtPath, fp),
+    [],
+  );
+
   const renderTabViewport = (tab: EditorTab, isSplitPane = false) => {
     const docKey = `${activeWorktreePath}::${tab.filePath}`;
     const doc = docsCache[docKey];
@@ -1127,28 +1149,6 @@ export const App: React.FC = () => {
       </div>
     );
   }
-
-  const handleSearchFilesMemo = useCallback(
-    (params: { worktreePath: string; query: string; allWorktrees: boolean }) =>
-      window.ide2.fuzzyFindFiles({ ...params, limit: 60 }),
-    [],
-  );
-
-  const handleSearchSymbolsMemo = useCallback(
-    (params: { worktreePath: string; query: string; allWorktrees: boolean }) =>
-      window.ide2.searchSymbols({ ...params, limit: 60 }),
-    [],
-  );
-
-  const handleFindInPathMemo = useCallback(
-    (q: FindInPathQuery) => window.ide2.findInPath(q),
-    [],
-  );
-
-  const handleLoadPreviewMemo = useCallback(
-    (wtPath: string, fp: string) => window.ide2.readFile(wtPath, fp),
-    [],
-  );
 
   const activeChangedFile = changedByWt[activeWorktreePath]?.find(
     (c) => c.path === activeTab?.filePath,

@@ -5,12 +5,12 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
+  protocol,
   shell,
   type WebContents,
 } from "electron";
-import { realpathSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { IntelClient } from "./intel/client.js";
 import { AnnotationStore } from "./services/annotations.js";
 import { resolveRepoContext, WorktreeService } from "./services/git.js";
@@ -28,8 +28,61 @@ import type {
   WorkspaceEvent,
 } from "../shared/protocol.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DIST_ROOT = resolve(__dirname, "..");
+const DIST_ROOT = resolve(app.getAppPath(), "dist");
+const RENDERER_ROOT = resolve(DIST_ROOT, "renderer");
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "ide2",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
+
+const STATIC_MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".woff2": "font/woff2",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+};
+
+function registerRendererProtocol(): void {
+  const canonRendererRoot = realpathSync(RENDERER_ROOT);
+  protocol.handle("ide2", (request) => {
+    try {
+      const url = new URL(request.url);
+      let reqPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+      if (!reqPath) reqPath = "index.html";
+      const candidate = resolve(canonRendererRoot, reqPath);
+      const canonTarget = realpathSync(candidate);
+      const rel = relative(canonRendererRoot, canonTarget);
+      if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      if (!statSync(canonTarget).isFile()) {
+        return new Response("Not Found", { status: 404 });
+      }
+      const ext = extname(canonTarget).toLowerCase();
+      const mime = STATIC_MIME[ext] ?? "application/octet-stream";
+      const body = readFileSync(canonTarget);
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": mime },
+      });
+    } catch {
+      return new Response("Not Found", { status: 404 });
+    }
+  });
+}
 
 interface ParsedProcessFlags {
   cwd: string;
@@ -78,7 +131,7 @@ const sessionsByCommonDir = new Map<string, RepoSession>();
 const sessionByWindowId = new Map<number, { session: RepoSession; launchContext: LaunchContext }>();
 
 const intel = new IntelClient({
-  workerPath: resolve(__dirname, "worker.cjs"),
+  workerPath: resolve(DIST_ROOT, "main/worker.cjs"),
 });
 
 function broadcastToSession(session: RepoSession, event: WorkspaceEvent): void {
@@ -351,6 +404,7 @@ async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> 
     autoHideMenuBar: process.platform !== "darwin",
     title: `expect2 IDE — ${launchContext.repoName}`,
     show: !process.env.IDE2_SMOKE_SCREENSHOT,
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       preload: resolve(DIST_ROOT, "preload/index.cjs"),
       contextIsolation: true,
@@ -364,6 +418,17 @@ async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> 
   sessionByWindowId.set(win.id, { session, launchContext });
   installNativeShortcutRouter(win);
 
+  if (process.env.IDE2_SMOKE_SCREENSHOT) {
+    win.webContents.on("console-message", (details) => {
+      if (details.level === "warning" || details.level === "error") {
+        process.stderr.write(`[renderer ${details.level}] ${details.message} (${details.sourceId}:${details.lineNumber})\n`);
+      }
+    });
+    win.webContents.on("did-fail-load", (_evt, code, desc, url) => {
+      process.stderr.write(`[renderer fail-load] ${code} ${desc} ${url}\n`);
+    });
+  }
+
   win.on("closed", () => {
     session.windows.delete(win);
     sessionByWindowId.delete(win.id);
@@ -373,8 +438,7 @@ async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> 
     }
   });
 
-  const htmlPath = resolve(DIST_ROOT, "renderer/index.html");
-  await win.loadFile(htmlPath);
+  await win.loadURL("ide2://app/index.html");
 
   if (process.env.IDE2_SMOKE_SCREENSHOT) {
     const outPath = process.env.IDE2_SMOKE_SCREENSHOT;
@@ -385,7 +449,7 @@ async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> 
       } finally {
         app.quit();
       }
-    }, 1400);
+    }, 1600);
   }
 
   return win;
@@ -674,6 +738,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    registerRendererProtocol();
     buildAppMenu();
     registerIpcHandlers();
     const initialFlags = parseFlags(process.argv, process.cwd());
