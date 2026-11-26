@@ -363,33 +363,6 @@ function buildAppMenu(): void {
         ] as Electron.MenuItemConstructorOptions[])
       : []),
     {
-      label: "File",
-      submenu: [
-        {
-          label: "Open Project in New Window…",
-          accelerator: "CmdOrCtrl+Shift+N",
-          click: () => {
-            void openProjectInNewWindow(
-              BrowserWindow.getFocusedWindow() ?? undefined,
-              undefined,
-              true,
-            );
-          },
-        },
-        {
-          label: "Recent Projects",
-          submenu: recentSubmenu,
-        },
-        { type: "separator" },
-        {
-          label: "Close Window",
-          click: () => {
-            BrowserWindow.getFocusedWindow()?.close();
-          },
-        },
-      ],
-    },
-    {
       label: "Edit",
       submenu: [
         { role: "undo" },
@@ -415,8 +388,31 @@ function buildAppMenu(): void {
     {
       label: "Window",
       submenu: [
+        {
+          label: "Open Project in New Window…",
+          accelerator: "CmdOrCtrl+Shift+N",
+          click: () => {
+            void openProjectInNewWindow(
+              BrowserWindow.getFocusedWindow() ?? undefined,
+              undefined,
+              true,
+            );
+          },
+        },
+        {
+          label: "Recent Projects",
+          submenu: recentSubmenu,
+        },
+        { type: "separator" },
         { role: "minimize" },
         { role: "zoom" },
+        { type: "separator" },
+        {
+          label: "Close Window",
+          click: () => {
+            BrowserWindow.getFocusedWindow()?.close();
+          },
+        },
       ],
     },
   ];
