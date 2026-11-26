@@ -1,21 +1,63 @@
 # ide2
 
-**A fast, read-only desktop IDE for reviewing AI-authored code across Git worktrees.**
-
-When coding agents write code across parallel Git worktrees, you don't need another editor fighting them for file locks — you need a fast way to navigate the codebase, review diffs, read Markdown specs, and send precise feedback back to your agent.
-
-`ide2` gives you familiar JetBrains navigation, multi-worktree awareness, a built-in Markdown reader, and line-anchored annotations that export as a clean Markdown prompt you can paste straight into your coding agent.
+**A fast, read-only desktop IDE built for reviewing AI-authored code across Git worktrees.**
 
 ---
 
-## Why ide2?
+## Motivation
 
-- **Strictly read-only & lock-safe** — Never modifies files in your repository, never stages or commits, and invokes Git with `--no-optional-locks` so it never collides with an agent working in the same tree.
-- **Built for parallel Git worktrees** — Automatically discovers all worktrees of the opened repository (including `.claude/worktrees/*` and sibling checkouts), keeps independent tab sessions per worktree, watches for live agent edits, and lets you diff **Branch vs Base**, **Working Tree vs HEAD**, individual **Commits**, or **Worktree vs Worktree**.
-- **Annotations → Agent Feedback Prompt** — Leave free-text notes on any code line, line range, diff deletion, or Markdown block. Notes are stored outside your repository (`~/.expect2-ide/`) and automatically re-anchor when the agent shifts lines above them. Copy everything as a structured Markdown prompt with one shortcut (`⇧⌘C` / `Ctrl+Shift+C`) or pipe it from your terminal with `ide2 --export`.
-- **First-class Markdown viewer** — Switch between **Preview**, **Split**, and **Raw** (`⇧⌘V` / `Ctrl+Shift+V`) with GFM tables, GitHub alerts, YAML frontmatter, Mermaid diagrams, clickable repo-relative links, and inline block annotations.
-- **JetBrains-style navigation & search** — `Shift+Shift` Search Everywhere, fuzzy file jump, ripgrep full-repo Find in Path, Tree-sitter AST structure & Go to Declaration / Find Usages, pinned tabs, tab right-click menu, and split panes.
-- **Multi-project windows** — Open multiple repositories side by side in separate windows via **Window → Open Project in New Window…** (`⇧⌘N` / `Ctrl+Shift+N`), the top-bar project switcher, or `ide2 /path/to/repo`.
+The way we write software has changed. When coding agents do most of the typing — often in parallel across multiple Git worktrees — your job shifts from editing text to **navigating the codebase, inspecting diffs, reading specs and plans, and steering the agent with clear feedback**.
+
+Traditional IDEs weren't built for this loop:
+
+- **They assume you're editing**, filling the screen with refactorings, formatters, and write-heavy tooling while competing with your agents for filesystem and Git index locks.
+- **They treat worktrees as an afterthought**, forcing you to juggle separate windows or lose track of which branch an agent is touching right now.
+- **They make reviewing specs and giving agent feedback clunky**, leaving you copying file paths, line ranges, and snippets by hand into a terminal prompt.
+
+`ide2` is a dedicated companion for agent-driven development: open any Git repository from your terminal, inspect every worktree and diff at a glance, annotate code or Markdown directly, and export structured feedback back to your coding agent in one keystroke.
+
+---
+
+## Principles
+
+1. **Strictly read-only & lock-safe** — `ide2` never edits source files, never stages changes, and never mutates Git state. Every Git command runs with `--no-optional-locks`, so it will never collide with an agent running in the same worktree.
+2. **Worktrees as a first-class unit** — Parallel agent branches belong in one place. All worktrees of the opened repository appear in an always-visible strip with independent tab sessions, live file-change indicators, and instant switching.
+3. **Closed feedback loop with your agent** — Annotations are stored outside your repository (`~/.expect2-ide/`), automatically re-anchor when the agent shifts lines above them, and compile into a clean Markdown **Feedback Prompt** ready to paste or pipe straight into your agent.
+4. **Familiar, keyboard-first navigation** — Built around JetBrains shortcuts (`Shift+Shift`, `⌘⇧O`, `⌘E`, `⌘⇧F`, `⌘B`, `⌘D`, `F7`) so you can jump across files, symbols, diffs, and worktrees without taking your hands off the keyboard.
+5. **Fast by default** — Virtualized code and diff viewports, native `ripgrep` full-repo search, Tree-sitter symbol outlines, and live filesystem watching without heavy IDE indexing overhead.
+
+---
+
+## Key Features
+
+### Multi-Worktree Git & Diffs
+- Automatically discovers all worktrees belonging to the opened repository (including `.claude/worktrees/*` and sibling checkouts) while excluding unrelated repos.
+- Always-visible **Worktree Strip** with live activity indicators, changed-file counts, and per-worktree tab sessions.
+- Four diff scopes in both **Split** and **Unified** views with intra-line word diffs and `F7` / `⇧F7` hunk navigation:
+  - **Branch vs Base** (`merge-base` ↔ working tree — ideal for reviewing an entire agent task)
+  - **Working Tree vs HEAD** (uncommitted and untracked changes)
+  - **Commit** (inspect any commit from the Git log)
+  - **Worktree vs Worktree** (compare two agent worktrees side by side)
+- Create new linked worktrees directly from the top bar (`+ Worktree`) or copy a worktree's path / `cd` command with one click.
+
+### Inline Annotations & Agent Feedback Prompt
+- Annotate any single line, multi-line selection, deleted diff line, or Markdown block with free-text Markdown notes (`⌘/` / `Ctrl+/` or the gutter `+` button).
+- Add high-level worktree instructions in the **Annotations** tool window (`⌘6` / `Alt+6`).
+- **Drift-resilient anchoring** — when an agent edits earlier lines in a file, open annotations automatically shift to the new line numbers (or flag as `OUTDATED` if the anchored lines themselves were rewritten).
+- Export all open annotations for the active worktree as a clean Markdown prompt via `⇧⌘C` (`Ctrl+Shift+C`), preview & customize via `⇧⌘E` (`Ctrl+Shift+E`), or print to `stdout` from the CLI with `ide2 --export`.
+
+### First-Class Markdown Viewer
+- Switch smoothly between **Preview**, **Split** (scroll-synced), and **Raw** (`⇧⌘V` / `Ctrl+Shift+V`).
+- Renders GitHub Flavored Markdown (tables, task lists, callout alerts), YAML frontmatter, Mermaid diagrams (with zoom modal), and local repository images.
+- Clickable repo-relative links (including `#heading` anchors and `file.ts:42` line jumps) open directly inside `ide2`.
+- Annotate rendered blocks right inside Preview — annotations map back to exact raw file line numbers.
+
+### Navigation, Search & Multi-Window Support
+- **Search Everywhere** (`Shift+Shift`), **Go to File** (`⇧⌘O` / `Ctrl+Shift+O`, press again to expand across all worktrees), **Go to Symbol** (`⌥⌘O` / `Ctrl+Alt+O`), and **Recent Files / Switcher** (`⌘E` / `Ctrl+E`).
+- **Find in Path** (`⇧⌘F` / `Ctrl+Shift+F`) powered by `ripgrep` with case, whole-word, regex, file-mask, and all-worktrees filters plus live surrounding-line preview.
+- **Structure** outline (`⌘7` / `Alt+7`), sticky enclosing-symbol header, **Go to Declaration** (`⌘B` / `Ctrl+B`), **Find Usages** (`⌥F7` / `Alt+F7`), and optional inline Git blame.
+- **Tab ergonomics**: JetBrains-style right-click context menu (pin/unpin, close others/left/right/unmodified, split right/down, copy path, open in diff, locate in Project tree).
+- **Multiple projects**: Open additional repositories in separate windows via **Window → Open Project in New Window…** (`⇧⌘N` / `Ctrl+Shift+N`), the top-bar project switcher, or `ide2 /path/to/repo`.
 
 ---
 
@@ -26,9 +68,9 @@ Works on **macOS**, **Linux**, and **Windows** (Git Bash / WSL).
 ### Prerequisites
 
 - [Git](https://git-scm.com/)
-- [Bun](https://bun.sh/) (if not installed, `install.sh` can install it automatically) and/or [Node.js](https://nodejs.org/)
+- [Bun](https://bun.sh/) (installed automatically by `install.sh` if missing) and/or [Node.js](https://nodejs.org/)
 
-### From source
+### Install from source
 
 ```bash
 git clone https://github.com/expect2/expect2-ide.git
@@ -36,9 +78,7 @@ cd expect2-ide
 ./install.sh
 ```
 
-`install.sh` installs dependencies, builds `ide2`, and installs the `ide2` command into your `PATH` (typically `~/.local/bin/ide2`).
-
-To install to a custom bin directory:
+`install.sh` installs dependencies, builds the app, and installs the `ide2` command onto your `PATH` (typically `~/.local/bin/ide2`). To choose a specific directory:
 
 ```bash
 IDE2_BIN_DIR=~/.local/bin ./install.sh
@@ -61,8 +101,6 @@ ide2 --export                 # Print the active worktree's Feedback Prompt to s
 ide2 --export --resolve       # Print the Feedback Prompt and mark annotations resolved
 ```
 
-### Options
-
 | Flag | Description |
 | --- | --- |
 | `-d, --diff` | Open in Diff Review mode |
@@ -76,13 +114,9 @@ ide2 --export --resolve       # Print the Feedback Prompt and mark annotations r
 
 ---
 
-## Review & Feedback Workflow
+## Example Feedback Prompt
 
-1. **Inspect changes** across worktrees in the top Worktree Strip or the **Git** panel (`⌘9` / `Alt+9`).
-2. **Annotate** any line, selection, diff hunk, or Markdown section with `⌘/` (`Ctrl+/`) or the gutter `+` button. Add optional high-level worktree instructions in the **Annotations** panel (`⌘6` / `Alt+6`).
-3. **Export to your coding agent** via `⇧⌘C` (`Ctrl+Shift+C`), preview & customize via `⇧⌘E` (`Ctrl+Shift+E`), or run `ide2 --export` directly from the terminal.
-
-Example exported prompt:
+Running `⇧⌘C` (`Ctrl+Shift+C`) or `ide2 --export` produces a self-contained prompt you can paste directly into your coding agent:
 
 ````markdown
 # Code Review Feedback — `wt-agent-a`
