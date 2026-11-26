@@ -1,6 +1,6 @@
-# expect2 IDE (`ide2`)
+# ide2
 
-Read-only, dark-mode-only IDE designed for the AI coding era — where code is written by external coding agents across parallel Git worktrees, and the human developer navigates, reviews diffs, reads specs/docs, and exports structured Markdown **Feedback Prompts**.
+Read-only, dark-mode-only IDE by `expect2` designed for the AI coding era — where code is written by external coding agents across parallel Git worktrees, and the human developer navigates, reviews diffs, reads specs/docs, and exports structured Markdown **Feedback Prompts**.
 
 - **JetBrains Ergonomics, Zero VIM Modalism:** `Shift+Shift` Search Everywhere, `Cmd/Ctrl+Shift+O` Go to File (double-tap for All Worktrees), `Cmd/Ctrl+E` Recent Files, `Cmd/Ctrl+Shift+F` Find in Path, `Cmd/Ctrl+B` Go to Declaration/Usages, `Cmd/Alt+1` Project, `Cmd/Alt+7` Structure, `Cmd/Alt+9` Git & Worktrees, `Cmd/Alt+6` Annotations, `Cmd/Ctrl+D` Diff, `F7` Next Change.
 - **`expect2` Retrofuture Night Visual System:** `#05081a` / `#0a0f2c` deep night ground, bundled `Kode Mono`, square `1px`/`2px` HUD chrome, VIM-dense gutter & statusline, restrained cold-tonal syntax highlighting, and sacred semantic verdict colors (`#6dffa6` / `#ff5d4d` / `#ffe45c`) reserved strictly for Git diffs & annotations.

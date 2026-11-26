@@ -1160,7 +1160,7 @@ export const App: React.FC = () => {
       <div className="ide-root" style={{ padding: "32px" }}>
         <div className="jb-popup" style={{ padding: "20px", maxWidth: "620px" }}>
           <h2 style={{ color: "var(--unsafe)", marginBottom: "8px" }}>
-            ✘ Could not open repository in expect2 IDE
+            ✘ Could not open repository in ide2
           </h2>
           <p style={{ color: "var(--dim)" }}>{bootError}</p>
           <p style={{ color: "var(--off)", marginTop: "12px", fontSize: "12px" }}>

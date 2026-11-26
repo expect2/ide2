@@ -413,7 +413,7 @@ describe("ide2 CLI & Multi-Worktree E2E", () => {
     const helpRes = runIde2Cli(["--help"]);
     expect(helpRes.status).toBe(0);
     expect(helpRes.stderr).toBe("");
-    expect(helpRes.stdout).toContain("expect2 IDE (ide2)");
+    expect(helpRes.stdout).toContain("ide2 — read-only IDE");
     expect(helpRes.stdout).toContain("Usage:");
     expect(helpRes.stdout).toContain("--diff");
     expect(helpRes.stdout).toContain("--base");

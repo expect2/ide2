@@ -1,8 +1,9 @@
 {
-  "name": "expect2-ide",
+  "name": "ide2",
+  "productName": "ide2",
   "version": "0.1.0",
   "private": true,
-  "description": "expect2 IDE (ide2) — read-only, JetBrains-inspired IDE for the AI coding era",
+  "description": "ide2 — read-only, JetBrains-inspired IDE for the AI coding era",
   "type": "module",
   "main": "./dist/main/index.cjs",
   "bin": {

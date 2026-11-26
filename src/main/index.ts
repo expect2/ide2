@@ -328,15 +328,15 @@ function buildAppMenu(): void {
     ...(isMac
       ? ([
           {
-            label: "expect2 IDE",
+            label: "ide2",
             submenu: [
-              { role: "about" },
+              { role: "about", label: "About ide2" },
               { type: "separator" },
-              { role: "hide" },
+              { role: "hide", label: "Hide ide2" },
               { role: "hideOthers" },
               { role: "unhide" },
               { type: "separator" },
-              { role: "quit" },
+              { role: "quit", label: "Quit ide2" },
             ],
           },
         ] as Electron.MenuItemConstructorOptions[])
@@ -402,7 +402,7 @@ async function openIdeWindow(flags: ParsedProcessFlags): Promise<BrowserWindow> 
     backgroundColor: "#181a1f",
     darkTheme: true,
     autoHideMenuBar: process.platform !== "darwin",
-    title: `expect2 IDE — ${launchContext.repoName}`,
+    title: `ide2 — ${launchContext.repoName}`,
     show: !process.env.IDE2_SMOKE_SCREENSHOT,
     paintWhenInitiallyHidden: true,
     webPreferences: {
@@ -723,6 +723,7 @@ function registerIpcHandlers(): void {
   );
 }
 
+app.setName("ide2");
 nativeTheme.themeSource = "dark";
 
 const gotSingleInstanceLock = process.env.IDE2_SMOKE_SCREENSHOT
@@ -738,6 +739,12 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    if (process.platform === "darwin") {
+      app.setAboutPanelOptions({
+        applicationName: "ide2",
+        applicationVersion: app.getVersion(),
+      });
+    }
     registerRendererProtocol();
     buildAppMenu();
     registerIpcHandlers();

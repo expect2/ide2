@@ -181,6 +181,7 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
         padding: "0 12px",
         height: "40px",
         minHeight: "40px",
+        flexShrink: 0,
         background: "var(--paper)",
         borderBottom: "1px solid var(--faint)",
         fontFamily: "var(--ui-font)",
@@ -201,7 +202,7 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
         title={
           onOpenSearchEverywhere
             ? `Search Everywhere (${formatShortcut("search-everywhere", platform)})`
-            : "expect2 IDE (read-only)"
+            : "ide2 (read-only)"
         }
         style={{
           display: "inline-flex",

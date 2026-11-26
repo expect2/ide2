@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 function printHelp() {
   process.stdout.write(
     [
-      "expect2 IDE (ide2) — read-only IDE for the AI coding era",
+      "ide2 — read-only IDE for the AI coding era",
       "",
       "Usage:",
       "  ide2 [path[:line[:col]]] [options]",
@@ -129,7 +129,11 @@ if (opts.exportPrompt) {
     process.exit(1);
   }
 
-  const electronBinary = require("electron");
+  const macWrapperBinary = resolve(APP_ROOT, "dist/ide2.app/Contents/MacOS/Electron");
+  const electronBinary =
+    process.platform === "darwin" && existsSync(macWrapperBinary)
+      ? macWrapperBinary
+      : require("electron");
   const electronArgs = [
     APP_ROOT,
     `--ide2-cwd=${cwd}`,
@@ -147,7 +151,7 @@ if (opts.exportPrompt) {
       stdio: "inherit",
       env,
     });
-    child.on("exit", (code) => process.exit(code ?? 0));
+    child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
   } else {
     const child = spawn(electronBinary, electronArgs, {
       detached: true,

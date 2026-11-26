@@ -1,4 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -101,5 +111,45 @@ copyFileSync(
   resolve(DIST, "renderer/index.html"),
 );
 
+// On macOS, create an APFS copy-on-write clone `dist/ide2.app` (zero extra disk blocks)
+// with CFBundleName/CFBundleDisplayName set to `ide2`, so the macOS menu bar, Dock,
+// and Cmd+Tab natively display `ide2` instead of `Electron`.
+if (process.platform === "darwin") {
+  const srcApp = resolve(ROOT, "node_modules/electron/dist/Electron.app");
+  if (existsSync(srcApp)) {
+    const dstApp = resolve(DIST, "ide2.app");
+    try {
+      execFileSync("cp", ["-c", "-R", srcApp, dstApp], { stdio: "ignore" });
+    } catch {
+      execFileSync("cp", ["-R", srcApp, dstApp], { stdio: "ignore" });
+    }
+
+    const plistPath = resolve(dstApp, "Contents/Info.plist");
+    let plist = readFileSync(plistPath, "utf8");
+    plist = plist
+      .replace(
+        /<key>CFBundleDisplayName<\/key>\s*<string>[^<]*<\/string>/,
+        "<key>CFBundleDisplayName</key>\n\t<string>ide2</string>",
+      )
+      .replace(
+        /<key>CFBundleName<\/key>\s*<string>[^<]*<\/string>/,
+        "<key>CFBundleName</key>\n\t<string>ide2</string>",
+      )
+      .replace(
+        /<key>CFBundleIdentifier<\/key>\s*<string>[^<]*<\/string>/,
+        "<key>CFBundleIdentifier</key>\n\t<string>dev.expect2.ide2</string>",
+      );
+    writeFileSync(plistPath, plist, "utf8");
+
+    try {
+      execFileSync("codesign", ["--force", "--deep", "--sign", "-", dstApp], {
+        stdio: "ignore",
+      });
+    } catch {
+      // Non-fatal if codesign is unavailable
+    }
+  }
+}
+
 const elapsed = (performance.now() - t0).toFixed(0);
-console.log(`✔ Built expect2-ide in ${elapsed}ms`);
+console.log(`✔ Built ide2 in ${elapsed}ms`);

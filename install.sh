@@ -17,7 +17,7 @@ info()  { printf "  %b\n" "$1"; }
 ok()    { printf "  ${SAFE}✔${RESET} %b\n" "$1"; }
 fail()  { printf "  ${UNSAFE}✘${RESET} %b\n" "$1" >&2; exit 1; }
 
-printf "\n  ${BOLD}expect${INV}2${RESET} ${BOLD}ide${RESET} ${DIM}installer${RESET}\n\n"
+printf "\n  ${BOLD}ide${INV}2${RESET} ${DIM}installer${RESET}\n\n"
 
 # 1. Verify git & node
 command -v git >/dev/null 2>&1 || fail "git is required but was not found on PATH."
@@ -48,7 +48,7 @@ fi
 INSTALL_HOME="${IDE2_HOME:-${HOME}/.expect2-ide}"
 mkdir -p "${INSTALL_HOME}"
 
-if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/package.json" ] && grep -q '"name": "expect2-ide"' "${SCRIPT_DIR}/package.json"; then
+if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/package.json" ] && grep -qE '"name": "(ide2|expect2-ide)"' "${SCRIPT_DIR}/package.json"; then
   APP_DIR="${SCRIPT_DIR}"
   ok "using checkout at ${APP_DIR}"
 else
@@ -69,7 +69,7 @@ info "installing dependencies..."
 info "building ide2 bundles..."
 (cd "${APP_DIR}" && bun run build)
 chmod +x "${APP_DIR}/bin/ide2.mjs"
-ok "built expect2-ide"
+ok "built ide2"
 
 # 6. Select target bin directory on PATH (macOS, Linux, Git Bash / MSYS2 / WSL)
 choose_bin_dir() {
