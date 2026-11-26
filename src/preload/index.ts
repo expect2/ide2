@@ -6,6 +6,7 @@ import type {
   FindInPathQuery,
   Ide2Bridge,
   UpdateAnnotationInput,
+  WalkthroughUserResponse,
   WorkspaceEvent,
 } from "../shared/protocol.js";
 
@@ -42,6 +43,10 @@ const bridge: Ide2Bridge = {
   createWorktree: (params) => ipcRenderer.invoke("ide2:createWorktree", params),
   openProjectWindow: (targetPath?: string) => ipcRenderer.invoke("ide2:openProjectWindow", targetPath),
   listRecentProjects: () => ipcRenderer.invoke("ide2:listRecentProjects"),
+  respondWalkthrough: (response: WalkthroughUserResponse) =>
+    ipcRenderer.invoke("ide2:respondWalkthrough", response),
+  endWalkthrough: () => ipcRenderer.invoke("ide2:endWalkthrough"),
+  getWalkthroughAgentPrompt: () => ipcRenderer.invoke("ide2:getWalkthroughAgentPrompt"),
   onEvent: (listener: (event: WorkspaceEvent) => void) => {
     const handler = (_evt: Electron.IpcRendererEvent, payload: WorkspaceEvent) => {
       listener(payload);

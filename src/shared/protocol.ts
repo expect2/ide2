@@ -275,6 +275,47 @@ export interface OpenProjectResult {
   error?: string;
 }
 
+export type WalkthroughTargetKind = "overview" | "folder" | "file" | "range" | "diff";
+
+export interface WalkthroughStep {
+  id: string;
+  sessionId: string;
+  worktreePath: string;
+  stepNumber: number;
+  totalSteps?: number;
+  title: string;
+  body: string;
+  targetKind: WalkthroughTargetKind;
+  targetPath?: string;
+  folderFiles?: string[];
+  startLine?: number;
+  endLine?: number;
+  diffScope?: DiffScope;
+  markdownMode?: "preview" | "split" | "raw";
+  final?: boolean;
+  createdAt: number;
+}
+
+export type WalkthroughUserAction = "next" | "steer" | "stop" | "finish";
+
+export interface WalkthroughUserResponse {
+  stepId: string;
+  action: WalkthroughUserAction;
+  message?: string;
+}
+
+export interface WalkthroughState {
+  sessionId: string;
+  repoCommonDir: string;
+  worktreePath: string;
+  title?: string;
+  totalSteps?: number;
+  steps: WalkthroughStep[];
+  activeStepId: string;
+  awaitingUser: boolean;
+  agentThinking: boolean;
+}
+
 export type WorkspaceEvent =
   | {
       type: "worktrees-updated";
@@ -306,6 +347,10 @@ export type WorkspaceEvent =
   | {
       type: "native-shortcut";
       action: string;
+    }
+  | {
+      type: "walkthrough-updated";
+      walkthrough: WalkthroughState | null;
     };
 
 export interface Ide2Bridge {
@@ -313,6 +358,7 @@ export interface Ide2Bridge {
     context: LaunchContext;
     worktrees: WorktreeInfo[];
     annotations: Annotation[];
+    walkthrough: WalkthroughState | null;
   }>;
   listFiles(worktreePath: string): Promise<FileEntry[]>;
   fuzzyFindFiles(params: {
@@ -352,5 +398,8 @@ export interface Ide2Bridge {
   createWorktree(params: { baseWorktreePath: string; branchName: string; baseRef?: string; targetDir?: string }): Promise<WorktreeInfo>;
   openProjectWindow(targetPath?: string): Promise<OpenProjectResult>;
   listRecentProjects(): Promise<RecentProject[]>;
+  respondWalkthrough(response: WalkthroughUserResponse): Promise<void>;
+  endWalkthrough(): Promise<void>;
+  getWalkthroughAgentPrompt(): Promise<string>;
   onEvent(listener: (event: WorkspaceEvent) => void): () => void;
 }

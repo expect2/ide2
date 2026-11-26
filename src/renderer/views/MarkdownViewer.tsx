@@ -72,6 +72,12 @@ export interface MarkdownViewerProps {
   findOpenTrigger?: number;
   annotateTrigger?: number;
   fontSizePx?: number;
+  spotlight?: {
+    startLine: number;
+    endLine: number;
+    card?: React.ReactNode;
+    seq?: string;
+  } | null;
 }
 
 const mdParser = unified()
@@ -551,6 +557,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
   findOpenTrigger = 0,
   annotateTrigger = 0,
   fontSizePx = 13.5,
+  spotlight = null,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const previewScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1099,102 +1106,147 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
     }
   };
 
-  const renderPreviewSurface = () => (
-    <div
-      ref={previewScrollRef}
-      className="md-preview-scroll"
-      onScroll={handlePreviewScroll}
-    >
-      <div className="md-prose">
-        {blockEntries.map(({ node, index, startLine, endLine, annotations: blockAnns }) => {
-          const gitStatus = detectGitDiffStatusForRange(
-            doc.lineGitMarkers,
-            startLine,
-            endLine,
-          );
-          const showComposerHere =
-            composerRange !== null &&
-            composerRange.endLine >= startLine &&
-            composerRange.endLine <= endLine;
+  // Scroll to spotlighted block in preview
+  useEffect(() => {
+    if (!spotlight || viewMode === "raw") return;
+    const container = previewScrollRef.current;
+    if (!container) return;
+    const blocks = container.querySelectorAll<HTMLElement>("[data-start-line]");
+    let targetEl: HTMLElement | null = null;
+    for (const el of blocks) {
+      const s = Number.parseInt(el.dataset.startLine ?? "0", 10);
+      const e = Number.parseInt(el.dataset.endLine ?? "0", 10);
+      if (e >= spotlight.startLine && s <= spotlight.endLine) {
+        targetEl = el;
+      }
+    }
+    targetEl?.scrollIntoView({ block: "center" });
+  }, [spotlight?.seq, spotlight?.startLine, spotlight?.endLine, viewMode]);
 
-          return (
-            <div
-              key={`blk-${index}-${startLine}`}
-              data-start-line={startLine}
-              data-end-line={endLine}
-              className={[
-                "md-block-wrap",
-                gitStatus === "added"
-                  ? "git-added"
-                  : gitStatus === "modified"
-                    ? "git-modified"
-                    : "",
-                flashedBlockStart === startLine ? "flash" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-            >
-              {onCreateAnnotation && (
-                <button
-                  type="button"
-                  className="md-block-gutter-btn"
-                  title={`Annotate Markdown lines L${startLine}-${endLine}`}
-                  onClick={() => setComposerRange({ startLine, endLine })}
-                >
-                  +
-                </button>
-              )}
+  const renderPreviewSurface = () => {
+    let spotlightAnchorBlockIdx: number | null = null;
+    if (spotlight) {
+      for (const b of blockEntries) {
+        if (b.endLine >= spotlight.startLine && b.startLine <= spotlight.endLine) {
+          spotlightAnchorBlockIdx = b.index;
+        }
+      }
+      if (spotlightAnchorBlockIdx === null && blockEntries.length > 0) {
+        const fallback =
+          blockEntries.filter((b) => b.startLine <= spotlight.endLine).pop() ??
+          blockEntries[0];
+        spotlightAnchorBlockIdx = fallback?.index ?? null;
+      }
+    }
 
-              {renderBlockNode(node, `node-${index}`)}
+    return (
+      <div
+        ref={previewScrollRef}
+        className="md-preview-scroll"
+        onScroll={handlePreviewScroll}
+      >
+        <div className={`md-prose ${spotlight ? "has-spotlight" : ""}`}>
+          {blockEntries.map(({ node, index, startLine, endLine, annotations: blockAnns }) => {
+            const gitStatus = detectGitDiffStatusForRange(
+              doc.lineGitMarkers,
+              startLine,
+              endLine,
+            );
+            const showComposerHere =
+              composerRange !== null &&
+              composerRange.endLine >= startLine &&
+              composerRange.endLine <= endLine;
+            const isSpotlightBlock =
+              spotlight !== null &&
+              endLine >= spotlight.startLine &&
+              startLine <= spotlight.endLine;
+            const showSpotlightCardHere =
+              spotlightAnchorBlockIdx === index && Boolean(spotlight?.card);
 
-              {blockAnns.length > 0 && (
-                <AnnotationThreadCard
-                  annotations={blockAnns}
-                  compact
-                  onEdit={onUpdateAnnotation}
-                  onResolve={onResolveAnnotation}
-                  onUnresolve={onUnresolveAnnotation}
-                  onDelete={onDeleteAnnotation}
-                />
-              )}
+            return (
+              <div
+                key={`blk-${index}-${startLine}`}
+                data-start-line={startLine}
+                data-end-line={endLine}
+                className={[
+                  "md-block-wrap",
+                  gitStatus === "added"
+                    ? "git-added"
+                    : gitStatus === "modified"
+                      ? "git-modified"
+                      : "",
+                  flashedBlockStart === startLine ? "flash" : "",
+                  isSpotlightBlock ? "tour-spotlight" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {onCreateAnnotation && (
+                  <button
+                    type="button"
+                    className="md-block-gutter-btn"
+                    title={`Annotate Markdown lines L${startLine}-${endLine}`}
+                    onClick={() => setComposerRange({ startLine, endLine })}
+                  >
+                    +
+                  </button>
+                )}
 
-              {showComposerHere && composerRange && (
-                <div style={{ marginTop: 6 }}>
-                  <AnnotationComposer
-                    filePath={doc.filePath}
-                    side="new"
-                    startLine={composerRange.startLine}
-                    endLine={composerRange.endLine}
-                    selectedPreview={doc.lines
-                      .slice(
-                        composerRange.startLine - 1,
-                        composerRange.endLine,
-                      )
-                      .join("\n")}
-                    onSubmit={handleSubmitBlockAnnotation}
-                    onCancel={() => setComposerRange(null)}
+                {renderBlockNode(node, `node-${index}`)}
+
+                {showSpotlightCardHere && (
+                  <div style={{ marginTop: 8 }}>{spotlight?.card}</div>
+                )}
+
+                {blockAnns.length > 0 && (
+                  <AnnotationThreadCard
+                    annotations={blockAnns}
+                    compact
+                    onEdit={onUpdateAnnotation}
+                    onResolve={onResolveAnnotation}
+                    onUnresolve={onUnresolveAnnotation}
+                    onDelete={onDeleteAnnotation}
                   />
-                </div>
-              )}
-            </div>
-          );
-        })}
+                )}
 
-        {unmatchedAnnotations.length > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <AnnotationThreadCard
-              annotations={unmatchedAnnotations}
-              compact
-              onEdit={onUpdateAnnotation}
-              onResolve={onResolveAnnotation}
-              onUnresolve={onUnresolveAnnotation}
-              onDelete={onDeleteAnnotation}
-            />
-          </div>
-        )}
+                {showComposerHere && composerRange && (
+                  <div style={{ marginTop: 6 }}>
+                    <AnnotationComposer
+                      filePath={doc.filePath}
+                      side="new"
+                      startLine={composerRange.startLine}
+                      endLine={composerRange.endLine}
+                      selectedPreview={doc.lines
+                        .slice(
+                          composerRange.startLine - 1,
+                          composerRange.endLine,
+                        )
+                        .join("\n")}
+                      onSubmit={handleSubmitBlockAnnotation}
+                      onCancel={() => setComposerRange(null)}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {unmatchedAnnotations.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <AnnotationThreadCard
+                annotations={unmatchedAnnotations}
+                compact
+                onEdit={onUpdateAnnotation}
+                onResolve={onResolveAnnotation}
+                onUnresolve={onUnresolveAnnotation}
+                onDelete={onDeleteAnnotation}
+              />
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div
@@ -1274,6 +1326,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
           findOpenTrigger={findOpenTrigger}
           annotateTrigger={annotateTrigger}
           fontSizePx={fontSizePx}
+          spotlight={spotlight}
         />
       )}
 
@@ -1300,6 +1353,11 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
               findOpenTrigger={findOpenTrigger}
               annotateTrigger={annotateTrigger}
               fontSizePx={fontSizePx}
+              spotlight={
+                spotlight
+                  ? { startLine: spotlight.startLine, endLine: spotlight.endLine, seq: spotlight.seq }
+                  : null
+              }
             />
           </div>
           {renderPreviewSurface()}

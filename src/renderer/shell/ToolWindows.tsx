@@ -124,6 +124,8 @@ export interface ProjectToolWindowProps {
   files: readonly FileEntry[];
   activeFilePath?: string;
   locateRequest?: { filePath: string; seq: number } | null;
+  highlightedDirPath?: string | null;
+  focusDirRequest?: { dirPath: string; seq: string } | null;
   annotations?: readonly Annotation[];
   activeWorktreePath?: string;
   platform: Platform;
@@ -258,6 +260,8 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
   files,
   activeFilePath,
   locateRequest,
+  highlightedDirPath = null,
+  focusDirRequest = null,
   annotations = [],
   activeWorktreePath,
   platform,
@@ -268,6 +272,7 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
   const [compactFolders, setCompactFolders] = useState<boolean>(true);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["src"]));
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const dirRowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const openAnnotationCountsByFile = useMemo(() => {
     const map = new Map<string, number>();
@@ -333,6 +338,24 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
       locateFilePath(locateRequest.filePath);
     }
   }, [locateRequest?.seq, locateRequest?.filePath]);
+
+  useEffect(() => {
+    if (!focusDirRequest?.dirPath) return;
+    const parts = focusDirRequest.dirPath.split("/").filter(Boolean);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      let prefix = "";
+      for (const seg of parts) {
+        prefix = prefix ? `${prefix}/${seg}` : seg;
+        next.add(prefix);
+      }
+      return next;
+    });
+    window.setTimeout(() => {
+      const el = dirRowRefs.current.get(focusDirRequest.dirPath);
+      el?.scrollIntoView({ block: "nearest" });
+    }, 28);
+  }, [focusDirRequest?.seq, focusDirRequest?.dirPath]);
 
   return (
     <section
@@ -414,9 +437,16 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
         ) : (
           rows.map((row) => {
             if (row.kind === "dir") {
+              const isHighlightedDir = Boolean(
+                highlightedDirPath && row.path === highlightedDirPath,
+              );
               return (
                 <button
                   key={row.key}
+                  ref={(el) => {
+                    if (el) dirRowRefs.current.set(row.path, el);
+                    else dirRowRefs.current.delete(row.path);
+                  }}
                   type="button"
                   role="treeitem"
                   aria-expanded={row.isExpanded}
@@ -432,9 +462,11 @@ export const ProjectToolWindow: React.FC<ProjectToolWindowProps> = ({
                     textAlign: "left",
                     padding: "0 8px",
                     paddingLeft: `${8 + row.depth * 14}px`,
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--ink)",
+                    background: isHighlightedDir ? "var(--sky-bg-hi)" : "transparent",
+                    border: isHighlightedDir
+                      ? "1px solid rgba(61, 107, 255, 0.5)"
+                      : "none",
+                    color: isHighlightedDir ? "#ffffff" : "var(--ink)",
                     fontFamily: "var(--ui-font)",
                     fontSize: "12.5px",
                     cursor: "pointer",

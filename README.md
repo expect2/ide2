@@ -31,6 +31,12 @@ In the agentic era, producing code is no longer the bottleneck. Coding agents wr
 
 ## Key Features
 
+### Agent-Driven Codebase Walkthroughs (`ide2 tour`)
+- Ask **any** coding agent (Claude Code, Codex, Grok Build, Pi, Aider, etc.) to walk you through a repository or feature top-down.
+- The agent drives `ide2` **one step at a time** via `ide2 tour step` — moving from architecture overview → folders → files → spotlighted line ranges or diffs — and renders rich Markdown + Mermaid explanations right inside `ide2`.
+- Each step **waits synchronously** until you click **Next →** in `ide2` (or type a quick question/detour right on the callout card to steer the agent's next step!).
+- Click **Walkthrough** (`⇧⌘T` / `Ctrl+Shift+T`) in the top bar to copy a ready-to-paste prompt for your agent, or install the reusable skill once with `ide2 tour install-skill`.
+
 ### Multi-Worktree Git & Diffs
 - Automatically discovers all worktrees belonging to the opened repository (including `.claude/worktrees/*` and sibling checkouts) while excluding unrelated repos.
 - Always-visible **Worktree Strip** with live activity indicators, changed-file counts, and per-worktree tab sessions.
@@ -116,6 +122,8 @@ ide2 --base develop           # Override the base branch used for diffs
 ide2 --worktree api-v2        # Focus a specific worktree by name or path
 ide2 --export                 # Print the active worktree's Feedback Prompt to stdout
 ide2 --export --resolve       # Print the Feedback Prompt and mark annotations resolved
+ide2 tour --help              # Agent-driven interactive codebase walkthrough commands
+ide2 tour install-skill       # Install the ide2-tour SKILL.md for skill-aware agents
 ```
 
 | Flag | Description |
@@ -178,6 +186,7 @@ Guard against undefined `token` before calling `token.slice(0, 12)`.
 | Copy Feedback Prompt | `⇧⌘C` | `Ctrl+Shift+C` |
 | Preview & Export Feedback Prompt | `⇧⌘E` | `Ctrl+Shift+E` |
 | Switch Worktree | `⇧⌘W` | `Ctrl+Shift+W` |
+| Copy Walkthrough Prompt for Agent | `⇧⌘T` | `Ctrl+Shift+T` |
 | Open Project in New Window | `⇧⌘N` | `Ctrl+Shift+N` |
 | Tool Windows: Project / Annotations / Structure / Git | `⌘1` / `⌘6` / `⌘7` / `⌘9` | `Alt+1` / `Alt+6` / `Alt+7` / `Alt+9` |
 | Split Editor Right / Close Tab | `⌘\` / `⌘W` | `Ctrl+\` / `Ctrl+W` |

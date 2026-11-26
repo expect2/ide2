@@ -15,6 +15,8 @@ import type {
   LineBlame,
   RecentProject,
   SearchMatch,
+  WalkthroughState,
+  WalkthroughStep,
   WorktreeInfo,
 } from "../shared/protocol.js";
 import {
@@ -28,6 +30,7 @@ import {
   IconSearch,
   IconSplit,
   IconStructure,
+  IconWalkthrough,
 } from "./components/BrandMark.js";
 import {
   formatShortcut,
@@ -68,6 +71,8 @@ import { WorktreeStrip } from "./shell/WorktreeStrip.js";
 import { CodeViewport } from "./views/CodeViewport.js";
 import { DiffViewport, type DiffViewMode } from "./views/DiffViewport.js";
 import { MarkdownViewer, type MarkdownViewMode } from "./views/MarkdownViewer.js";
+import { WalkthroughBar } from "./views/WalkthroughBar.js";
+import { WalkthroughCard } from "./views/WalkthroughCard.js";
 
 interface WorktreeSessionState {
   tabs: EditorTab[];
@@ -192,6 +197,13 @@ export const App: React.FC = () => {
     filePath: string;
     seq: number;
   } | null>(null);
+  const [walkthrough, setWalkthrough] = useState<WalkthroughState | null>(null);
+  const [viewedStepId, setViewedStepId] = useState<string>("");
+  const [folderFocusReq, setFolderFocusReq] = useState<{
+    dirPath: string;
+    seq: string;
+  } | null>(null);
+  const lastNavigatedStepIdRef = useRef<string>("");
 
   // Navigation History & Recent Files
   const navStackRef = useRef<{ items: NavHistoryEntry[]; index: number }>({
@@ -294,6 +306,7 @@ export const App: React.FC = () => {
         column?: number;
         viewKind?: "code" | "diff";
         diffScope?: DiffScope;
+        markdownMode?: MarkdownViewMode;
         recordHistory?: boolean;
       },
     ) => {
@@ -331,7 +344,13 @@ export const App: React.FC = () => {
         const exists = existingSession.tabs.some((t) => t.id === tabId);
         const nextTabs: EditorTab[] = exists
           ? existingSession.tabs.map((t) =>
-              t.id === tabId && options?.diffScope ? { ...t, diffScope: options.diffScope } : t,
+              t.id === tabId
+                ? {
+                    ...t,
+                    ...(options?.diffScope ? { diffScope: options.diffScope } : {}),
+                    ...(options?.markdownMode ? { markdownMode: options.markdownMode } : {}),
+                  }
+                : t,
             )
           : [
               ...existingSession.tabs,
@@ -340,7 +359,9 @@ export const App: React.FC = () => {
                 filePath,
                 viewKind,
                 diffScope: options?.diffScope ?? existingSession.diffScope,
-                markdownMode: isMarkdownFile(filePath) ? "preview" : undefined,
+                markdownMode:
+                  options?.markdownMode ??
+                  (isMarkdownFile(filePath) ? "preview" : undefined),
               },
             ];
         return {
@@ -396,16 +417,48 @@ export const App: React.FC = () => {
     [activeWorktreePath, loadDiffDocument, loadFileDocument, showToast, worktrees],
   );
 
+  const applyWalkthroughStepNavigation = useCallback(
+    (step: WalkthroughStep) => {
+      setViewedStepId(step.id);
+      if (step.worktreePath && step.worktreePath !== activeWtRef.current) {
+        setActiveWorktreePath(step.worktreePath);
+      }
+      if (step.targetKind === "folder" && step.targetPath) {
+        setLeftTool("project");
+        setFolderFocusReq({ dirPath: step.targetPath, seq: `${step.id}-${Date.now()}` });
+      } else if (
+        (step.targetKind === "file" || step.targetKind === "range") &&
+        step.targetPath
+      ) {
+        void openFileInWorktree(step.worktreePath, step.targetPath, {
+          viewKind: "code",
+          markdownMode: step.markdownMode,
+          line: step.targetKind === "file" ? 1 : undefined,
+        });
+      } else if (step.targetKind === "diff" && step.targetPath) {
+        void openFileInWorktree(step.worktreePath, step.targetPath, {
+          viewKind: "diff",
+          diffScope: step.diffScope ?? { kind: "branch" },
+        });
+      }
+    },
+    [openFileInWorktree],
+  );
+
   // Bootstrap IDE on mount
   useEffect(() => {
     let mounted = true;
     window.ide2
       .getBootstrap()
-      .then(async ({ context: ctx, worktrees: wts, annotations: anns }) => {
+      .then(async ({ context: ctx, worktrees: wts, annotations: anns, walkthrough: initialWtTour }) => {
         if (!mounted) return;
         setContext(ctx);
         setWorktrees(wts);
         setAnnotations(anns);
+        if (initialWtTour) {
+          setWalkthrough(initialWtTour);
+          setViewedStepId(initialWtTour.activeStepId);
+        }
 
         const initialWt =
           wts.find((w) => w.path === ctx.initialWorktreePath)?.path ?? wts[0]?.path ?? "";
@@ -441,6 +494,16 @@ export const App: React.FC = () => {
               await openFileInWorktree(initialWt, firstTarget, {
                 diffScope: defaultScope,
               });
+            }
+          }
+
+          if (initialWtTour && initialWtTour.steps.length > 0) {
+            const activeTourStep =
+              initialWtTour.steps.find((s) => s.id === initialWtTour.activeStepId) ??
+              initialWtTour.steps[initialWtTour.steps.length - 1];
+            if (activeTourStep) {
+              lastNavigatedStepIdRef.current = activeTourStep.id;
+              applyWalkthroughStepNavigation(activeTourStep);
             }
           }
         }
@@ -565,9 +628,26 @@ export const App: React.FC = () => {
         }
       } else if (event.type === "native-shortcut") {
         runActionRef.current(event.action as IdeAction);
+      } else if (event.type === "walkthrough-updated") {
+        setWalkthrough(event.walkthrough);
+        if (!event.walkthrough) {
+          setViewedStepId("");
+          lastNavigatedStepIdRef.current = "";
+        } else if (
+          event.walkthrough.activeStepId &&
+          event.walkthrough.activeStepId !== lastNavigatedStepIdRef.current
+        ) {
+          const nextStep = event.walkthrough.steps.find(
+            (s) => s.id === event.walkthrough!.activeStepId,
+          );
+          if (nextStep) {
+            lastNavigatedStepIdRef.current = nextStep.id;
+            applyWalkthroughStepNavigation(nextStep);
+          }
+        }
       }
     });
-  }, [loadDiffDocument, loadFileDocument, loadWorktreeResources, openFileInWorktree]);
+  }, [applyWalkthroughStepNavigation, loadDiffDocument, loadFileDocument, loadWorktreeResources, openFileInWorktree]);
 
   const handleCopyPromptQuick = useCallback(
     async (opts?: Partial<ExportPromptOptions>) => {
@@ -626,6 +706,16 @@ export const App: React.FC = () => {
       window.removeEventListener("keydown", onKey);
     };
   }, [projectMenuOpen]);
+
+  const handleCopyWalkthroughPrompt = useCallback(async () => {
+    try {
+      const prompt = await window.ide2.getWalkthroughAgentPrompt();
+      await window.ide2.copyToClipboard(prompt);
+      showToast("Copied Walkthrough Prompt — paste into your coding agent!");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    }
+  }, [showToast]);
 
   const updateActiveSessionTabs = useCallback(
     (updater: (session: WorktreeSessionState) => WorktreeSessionState) => {
@@ -716,6 +806,9 @@ export const App: React.FC = () => {
           break;
         case "open-project-window":
           void handleOpenProjectWindow();
+          break;
+        case "copy-walkthrough-prompt":
+          void handleCopyWalkthroughPrompt();
           break;
         case "recent-files":
           setRecentPopupOpen((v) => !v);
@@ -901,6 +994,7 @@ export const App: React.FC = () => {
       docsCache,
       handleCloseTab,
       handleCopyPromptQuick,
+      handleCopyWalkthroughPrompt,
       handleOpenProjectWindow,
       handleSymbolActivate,
       openFileInWorktree,
@@ -988,11 +1082,86 @@ export const App: React.FC = () => {
     [],
   );
 
+  const viewedWalkthroughStep = useMemo(() => {
+    if (!walkthrough || walkthrough.steps.length === 0) return null;
+    return (
+      walkthrough.steps.find((s) => s.id === viewedStepId) ??
+      walkthrough.steps.find((s) => s.id === walkthrough.activeStepId) ??
+      walkthrough.steps[walkthrough.steps.length - 1] ??
+      null
+    );
+  }, [walkthrough, viewedStepId]);
+
+  const renderWalkthroughCard = (
+    step: WalkthroughStep,
+    variant: "banner" | "inline",
+  ): React.ReactNode => {
+    if (!walkthrough) return null;
+    const idx = walkthrough.steps.findIndex((s) => s.id === step.id);
+    const latest = walkthrough.steps[walkthrough.steps.length - 1];
+    const isLatestStep = Boolean(latest && latest.id === step.id);
+
+    return (
+      <WalkthroughCard
+        step={step}
+        variant={variant}
+        isLatestStep={isLatestStep}
+        hasPrev={idx > 0}
+        hasNextVisited={idx >= 0 && idx < walkthrough.steps.length - 1}
+        awaitingUser={walkthrough.awaitingUser}
+        agentThinking={walkthrough.agentThinking}
+        onPrev={() => {
+          const prevStep = walkthrough.steps[idx - 1];
+          if (prevStep) applyWalkthroughStepNavigation(prevStep);
+        }}
+        onNextVisited={() => {
+          const nextStep = walkthrough.steps[idx + 1];
+          if (nextStep) applyWalkthroughStepNavigation(nextStep);
+        }}
+        onReturnToLatest={() => {
+          if (latest) applyWalkthroughStepNavigation(latest);
+        }}
+        onAdvance={() =>
+          window.ide2.respondWalkthrough({
+            stepId: step.id,
+            action: step.final ? "finish" : "next",
+          })
+        }
+        onSteer={(message) =>
+          window.ide2.respondWalkthrough({
+            stepId: step.id,
+            action: "steer",
+            message,
+          })
+        }
+        onStop={() => window.ide2.endWalkthrough()}
+        onOpenRepoTarget={(rawTarget) => {
+          const cleaned = rawTarget.replace(/^\/+/, "");
+          const match = /^(.*?):(\d+)/.exec(cleaned);
+          if (match?.[1]) {
+            void openFileInWorktree(step.worktreePath, match[1], {
+              line: Number.parseInt(match[2] ?? "1", 10),
+            });
+          } else {
+            void openFileInWorktree(step.worktreePath, cleaned);
+          }
+        }}
+      />
+    );
+  };
+
   const renderTabViewport = (tab: EditorTab, isSplitPane = false) => {
     const docKey = `${activeWorktreePath}::${tab.filePath}`;
     const doc = docsCache[docKey];
     const syms = symbolsCache[docKey] ?? [];
     const fileAnns = worktreeAnnotations.filter((a) => a.filePath === tab.filePath);
+    const matchesInlineTour =
+      !isSplitPane &&
+      viewedWalkthroughStep !== null &&
+      viewedWalkthroughStep.worktreePath === activeWorktreePath &&
+      viewedWalkthroughStep.targetPath === tab.filePath &&
+      ((viewedWalkthroughStep.targetKind === "range" && tab.viewKind === "code") ||
+        (viewedWalkthroughStep.targetKind === "diff" && tab.viewKind === "diff"));
 
     const onCreateAnn = async (input: {
       comment: string;
@@ -1077,6 +1246,16 @@ export const App: React.FC = () => {
           hunkNavTrigger={!isSplitPane ? hunkNavTrigger : null}
           onOpenFile={(fp, ln) =>
             void openFileInWorktree(activeWorktreePath, fp, { line: ln, viewKind: "code" })
+          }
+          spotlight={
+            matchesInlineTour && viewedWalkthroughStep
+              ? {
+                  startLine: viewedWalkthroughStep.startLine,
+                  endLine: viewedWalkthroughStep.endLine,
+                  card: renderWalkthroughCard(viewedWalkthroughStep, "inline"),
+                  seq: viewedWalkthroughStep.id,
+                }
+              : null
           }
         />
       );
@@ -1170,6 +1349,17 @@ export const App: React.FC = () => {
           }}
           findOpenTrigger={!isSplitPane ? findTrigger : 0}
           annotateTrigger={!isSplitPane ? annotateTrigger : 0}
+          spotlight={
+            matchesInlineTour && viewedWalkthroughStep && viewedWalkthroughStep.startLine
+              ? {
+                  startLine: viewedWalkthroughStep.startLine,
+                  endLine:
+                    viewedWalkthroughStep.endLine ?? viewedWalkthroughStep.startLine,
+                  card: renderWalkthroughCard(viewedWalkthroughStep, "inline"),
+                  seq: viewedWalkthroughStep.id,
+                }
+              : null
+          }
         />
       );
     }
@@ -1195,6 +1385,17 @@ export const App: React.FC = () => {
         }}
         findOpenTrigger={!isSplitPane ? findTrigger : 0}
         annotateTrigger={!isSplitPane ? annotateTrigger : 0}
+        spotlight={
+          matchesInlineTour && viewedWalkthroughStep && viewedWalkthroughStep.startLine
+            ? {
+                startLine: viewedWalkthroughStep.startLine,
+                endLine:
+                  viewedWalkthroughStep.endLine ?? viewedWalkthroughStep.startLine,
+                card: renderWalkthroughCard(viewedWalkthroughStep, "inline"),
+                seq: viewedWalkthroughStep.id,
+              }
+            : null
+        }
       />
     );
   };
@@ -1442,6 +1643,15 @@ export const App: React.FC = () => {
           )}
           <button
             type="button"
+            className="btn btn-ghost"
+            onClick={() => void handleCopyWalkthroughPrompt()}
+            title={`Copy prompt for your coding agent to drive an interactive walkthrough (${formatShortcut("copy-walkthrough-prompt", platform)})`}
+          >
+            <IconWalkthrough size={13} />
+            <span>Walkthrough</span>
+          </button>
+          <button
+            type="button"
             className="btn btn-primary"
             onClick={() => setExportModalOpen(true)}
             title={`Preview & Export Feedback Prompt (${formatShortcut("export-prompt-preview", platform)})`}
@@ -1451,6 +1661,16 @@ export const App: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* 2b. Active Walkthrough Step Outline Bar */}
+      {walkthrough && walkthrough.steps.length > 0 && viewedWalkthroughStep && (
+        <WalkthroughBar
+          walkthrough={walkthrough}
+          viewedStepId={viewedWalkthroughStep.id}
+          onSelectStep={(s) => applyWalkthroughStepNavigation(s)}
+          onEndWalkthrough={() => window.ide2.endWalkthrough()}
+        />
+      )}
 
       {/* 3. Main JetBrains Body: Left Tool Stripe + Left Dock + Editor Canvas + Right Annotations Dock */}
       <div className="ide-body">
@@ -1500,6 +1720,13 @@ export const App: React.FC = () => {
                 files={filesByWt[activeWorktreePath] ?? []}
                 activeFilePath={activeTab?.filePath}
                 locateRequest={projectLocateReq}
+                highlightedDirPath={
+                  viewedWalkthroughStep?.targetKind === "folder" &&
+                  viewedWalkthroughStep.worktreePath === activeWorktreePath
+                    ? viewedWalkthroughStep.targetPath ?? null
+                    : null
+                }
+                focusDirRequest={folderFocusReq}
                 annotations={worktreeAnnotations}
                 activeWorktreePath={activeWorktreePath}
                 platform={platform}
@@ -1636,6 +1863,18 @@ export const App: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Banner Walkthrough Card for Overview, Folder, Whole-File, or off-tab Range steps */}
+            {viewedWalkthroughStep &&
+              (viewedWalkthroughStep.targetKind === "overview" ||
+                viewedWalkthroughStep.targetKind === "folder" ||
+                viewedWalkthroughStep.targetKind === "file" ||
+                !activeTab ||
+                viewedWalkthroughStep.worktreePath !== activeWorktreePath ||
+                viewedWalkthroughStep.targetPath !== activeTab.filePath ||
+                (viewedWalkthroughStep.targetKind === "range" && activeTab.viewKind !== "code") ||
+                (viewedWalkthroughStep.targetKind === "diff" && activeTab.viewKind !== "diff")) &&
+              renderWalkthroughCard(viewedWalkthroughStep, "banner")}
 
             {/* Viewport or Split Viewports */}
             {activeTab ? (

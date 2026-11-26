@@ -205,3 +205,10 @@ export const IconNewWindow: React.FC<{ size?: number }> = ({ size = 14 }) => (
     <path d="M2 5.5h12M8 7.75v3.5M6.25 9.5h3.5" />
   </svg>
 );
+
+export const IconWalkthrough: React.FC<{ size?: number }> = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="8" cy="8" r="6" />
+    <polygon points="6.6,6.6 10.8,5.2 9.4,9.4 5.2,10.8" />
+  </svg>
+);

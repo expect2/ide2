@@ -43,6 +43,12 @@ export interface DiffViewportProps {
   onDeleteAnnotation?: (annotation: Annotation) => void | Promise<void>;
   hunkNavTrigger?: { direction: "next" | "prev"; seq: number } | null;
   onOpenFile?: (filePath: string, line?: number) => void;
+  spotlight?: {
+    startLine?: number;
+    endLine?: number;
+    card?: React.ReactNode;
+    seq?: string;
+  } | null;
 }
 
 type UnifiedDisplayItem =
@@ -136,6 +142,7 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
   onDeleteAnnotation,
   hunkNavTrigger,
   onOpenFile,
+  spotlight = null,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -302,6 +309,46 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
     jumpHunk(hunkNavTrigger.direction);
   }, [hunkNavTrigger?.seq]);
 
+  const { spotlightRowSet, spotlightAnchorIdx } = useMemo(() => {
+    const matched = new Set<number>();
+    if (!spotlight) {
+      return { spotlightRowSet: matched, spotlightAnchorIdx: null as number | null };
+    }
+    const sLine = spotlight.startLine;
+    const eLine = spotlight.endLine ?? sLine;
+
+    if (sLine !== undefined && eLine !== undefined) {
+      if (viewMode === "split") {
+        diff.rows.forEach((r, idx) => {
+          if (r.type === "hunk") return;
+          const nMatch = r.newLineNumber !== undefined && r.newLineNumber >= sLine && r.newLineNumber <= eLine;
+          const oMatch = r.oldLineNumber !== undefined && r.oldLineNumber >= sLine && r.oldLineNumber <= eLine;
+          if (nMatch || oMatch) matched.add(idx);
+        });
+      } else {
+        unifiedItems.forEach((item, idx) => {
+          if (item.kind !== "line") return;
+          const ln = item.newLineNumber ?? item.oldLineNumber;
+          if (ln !== undefined && ln >= sLine && ln <= eLine) matched.add(idx);
+        });
+      }
+    }
+
+    let anchor: number | null = null;
+    for (const idx of matched) {
+      if (anchor === null || idx > anchor) anchor = idx;
+    }
+    if (anchor === null && spotlight.card && itemCount > 0) {
+      anchor = hunkIndices[0] ?? 0;
+    }
+    return { spotlightRowSet: matched, spotlightAnchorIdx: anchor };
+  }, [spotlight, viewMode, diff.rows, unifiedItems, itemCount, hunkIndices]);
+
+  useEffect(() => {
+    if (spotlightAnchorIdx === null) return;
+    virtualizer.scrollToIndex(spotlightAnchorIdx, { align: "center" });
+  }, [spotlight?.seq, spotlightAnchorIdx]);
+
   // Group annotations by side + anchor line
   const { oldThreads, newThreads, oldGutter, newGutter } = useMemo(() => {
     const oThreads = new Map<number, Annotation[]>();
@@ -414,7 +461,7 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
   return (
     <div
       ref={rootRef}
-      className="diff-viewport"
+      className={`diff-viewport ${spotlightRowSet.size > 0 ? "has-spotlight" : ""}`}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
@@ -670,6 +717,10 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                   .filter(Boolean)
                   .join(" ");
 
+                const showSpotlightHere =
+                  spotlightAnchorIdx === vItem.index && Boolean(spotlight?.card);
+                const isSpotlightRow = spotlightRowSet.has(vItem.index);
+
                 return (
                   <div
                     key={vItem.key}
@@ -678,7 +729,7 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                     className="code-row"
                     style={{ transform: `translateY(${vItem.start}px)` }}
                   >
-                    <div className="diff-split-row">
+                    <div className={`diff-split-row ${isSpotlightRow ? "tour-spotlight" : ""}`}>
                       {/* OLD SIDE */}
                       <div className={oldCellClass}>
                         {hasOld ? (
@@ -833,8 +884,10 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                     {(oldAnnList.length > 0 ||
                       newAnnList.length > 0 ||
                       showOldComposer ||
-                      showNewComposer) && (
+                      showNewComposer ||
+                      showSpotlightHere) && (
                       <div className="code-inline-slot">
+                        {showSpotlightHere && spotlight?.card}
                         {oldAnnList.length > 0 && (
                           <AnnotationThreadCard
                             annotations={oldAnnList}
@@ -929,6 +982,9 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                 targetLine !== undefined &&
                 composer?.side === item.side &&
                 composer.endLine === targetLine;
+              const showSpotlightHere =
+                spotlightAnchorIdx === vItem.index && Boolean(spotlight?.card);
+              const isSpotlightRow = spotlightRowSet.has(vItem.index);
 
               return (
                 <div
@@ -947,6 +1003,7 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                           ? "del"
                           : "",
                       isSelected ? "selected" : "",
+                      isSpotlightRow ? "tour-spotlight" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
@@ -1025,8 +1082,9 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                     </div>
                   </div>
 
-                  {(threadList.length > 0 || showComposerHere) && (
+                  {(threadList.length > 0 || showComposerHere || showSpotlightHere) && (
                     <div className="code-inline-slot">
+                      {showSpotlightHere && spotlight?.card}
                       {threadList.length > 0 && (
                         <AnnotationThreadCard
                           annotations={threadList}

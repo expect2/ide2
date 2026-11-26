@@ -51,13 +51,22 @@ const jobs: Promise<Bun.BuildOutput>[] = [
     sourcemap: "external",
     external: ["electron"],
   }),
-  // 3. Headless CLI `--export` entry
+  // 3. Headless CLI `--export` & `tour` entries
   Bun.build({
     entrypoints: [resolve(ROOT, "src/cli/export.ts")],
     outdir: resolve(DIST, "cli"),
     target: "node",
     format: "cjs",
     naming: "export.cjs",
+    sourcemap: "external",
+    external: NODE_EXTERNALS,
+  }),
+  Bun.build({
+    entrypoints: [resolve(ROOT, "src/cli/tour.ts")],
+    outdir: resolve(DIST, "cli"),
+    target: "node",
+    format: "cjs",
+    naming: "tour.cjs",
     sourcemap: "external",
     external: NODE_EXTERNALS,
   }),

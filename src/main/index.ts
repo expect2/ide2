@@ -16,7 +16,9 @@ import { IntelClient } from "./intel/client.js";
 import { AnnotationStore } from "./services/annotations.js";
 import { resolveRepoContext, WorktreeService } from "./services/git.js";
 import { RecentProjectsStore } from "./services/recent-projects.js";
+import { TourServer } from "./services/tour-server.js";
 import { MultiWorktreeWatcher } from "./services/watcher.js";
+import { buildWalkthroughAgentPrompt } from "../shared/walkthrough-prompt.js";
 import type {
   CodeSymbol,
   CreateAnnotationInput,
@@ -28,6 +30,7 @@ import type {
   OpenProjectResult,
   TokenSpan,
   UpdateAnnotationInput,
+  WalkthroughUserResponse,
   WorkspaceEvent,
 } from "../shared/protocol.js";
 
@@ -134,6 +137,46 @@ const sessionsByCommonDir = new Map<string, RepoSession>();
 const sessionByWindowId = new Map<number, { session: RepoSession; launchContext: LaunchContext }>();
 const recentProjects = new RecentProjectsStore();
 let openProjectDialogInFlight = false;
+
+const tourServer = new TourServer({
+  ensureRepoWindow: async ({ cwd, worktree, focusWindow }) => {
+    const flags: ParsedProcessFlags = {
+      cwd,
+      target: cwd,
+      diff: false,
+      worktree,
+    };
+    const opened = await openIdeWindow(flags, undefined, {
+      focusOnReuse: focusWindow,
+      suppressCliOpenEvent: true,
+    });
+    const { session, launchContext } = await getOrCreateRepoSession(flags);
+    const cachedWts = session.git.listCachedWorktrees();
+    const worktrees =
+      cachedWts.length > 0
+        ? cachedWts
+        : await session.git.discoverWorktrees(launchContext.initialWorktreePath);
+    if (focusWindow && !opened.win.isDestroyed()) {
+      opened.win.show();
+      opened.win.focus();
+    }
+    return {
+      repoCommonDir: session.context.repoCommonDir,
+      repoName: session.context.repoName,
+      worktreePath: launchContext.initialWorktreePath,
+      worktrees,
+    };
+  },
+  broadcastWalkthrough: (repoCommonDir, state) => {
+    const session = sessionsByCommonDir.get(repoCommonDir);
+    if (session) {
+      broadcastToSession(session, {
+        type: "walkthrough-updated",
+        walkthrough: state,
+      });
+    }
+  },
+});
 
 const intel = new IntelClient({
   workerPath: resolve(DIST_ROOT, "main/worker.cjs"),
@@ -403,6 +446,14 @@ function buildAppMenu(): void {
           label: "Recent Projects",
           submenu: recentSubmenu,
         },
+        {
+          label: "Copy Walkthrough Prompt for Agent",
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            const bound = win ? sessionByWindowId.get(win.id) : undefined;
+            clipboard.writeText(buildWalkthroughAgentPrompt(bound?.session.context.repoName));
+          },
+        },
         { type: "separator" },
         { role: "minimize" },
         { role: "zoom" },
@@ -481,6 +532,7 @@ async function openProjectInNewWindow(
 async function openIdeWindow(
   flags: ParsedProcessFlags,
   cascadeFromWin?: BrowserWindow,
+  options?: { focusOnReuse?: boolean; suppressCliOpenEvent?: boolean },
 ): Promise<{ win: BrowserWindow; reused: boolean; repoName: string }> {
   const { session, launchContext } = await getOrCreateRepoSession(flags);
 
@@ -494,16 +546,20 @@ async function openIdeWindow(
   // Warm-window reuse if this repository already has an open window!
   const existingWin = Array.from(session.windows).find((w) => !w.isDestroyed());
   if (existingWin) {
-    if (existingWin.isMinimized()) existingWin.restore();
-    existingWin.focus();
-    existingWin.webContents.send("ide2:event", {
-      type: "cli-open-target",
-      worktreePath: launchContext.initialWorktreePath,
-      filePath: launchContext.initialFilePath,
-      line: launchContext.initialLine,
-      column: launchContext.initialColumn,
-      diffMode: launchContext.initialDiffMode,
-    } satisfies WorkspaceEvent);
+    if (options?.focusOnReuse !== false) {
+      if (existingWin.isMinimized()) existingWin.restore();
+      existingWin.focus();
+    }
+    if (!options?.suppressCliOpenEvent) {
+      existingWin.webContents.send("ide2:event", {
+        type: "cli-open-target",
+        worktreePath: launchContext.initialWorktreePath,
+        filePath: launchContext.initialFilePath,
+        line: launchContext.initialLine,
+        column: launchContext.initialColumn,
+        diffMode: launchContext.initialDiffMode,
+      } satisfies WorkspaceEvent);
+    }
     return { win: existingWin, reused: true, repoName: launchContext.repoName };
   }
 
@@ -594,6 +650,7 @@ function registerIpcHandlers(): void {
       context: launchContext,
       worktrees,
       annotations,
+      walkthrough: tourServer.getState(session.context.repoCommonDir),
     };
   });
 
@@ -871,6 +928,21 @@ function registerIpcHandlers(): void {
   ipcMain.handle("ide2:listRecentProjects", () => {
     return recentProjects.list();
   });
+
+  ipcMain.handle("ide2:respondWalkthrough", (evt, response: WalkthroughUserResponse) => {
+    const { session } = getWindowSession(evt.sender);
+    tourServer.respondFromUser(session.context.repoCommonDir, response);
+  });
+
+  ipcMain.handle("ide2:endWalkthrough", (evt) => {
+    const { session } = getWindowSession(evt.sender);
+    tourServer.endFromUser(session.context.repoCommonDir);
+  });
+
+  ipcMain.handle("ide2:getWalkthroughAgentPrompt", (evt) => {
+    const { session } = getWindowSession(evt.sender);
+    return buildWalkthroughAgentPrompt(session.context.repoName);
+  });
 }
 
 app.setName("ide2");
@@ -898,6 +970,11 @@ if (!gotSingleInstanceLock) {
     registerRendererProtocol();
     buildAppMenu();
     registerIpcHandlers();
+    try {
+      await tourServer.listen();
+    } catch (err) {
+      console.error("Failed to start ide2 tour RPC socket:", err);
+    }
     const initialFlags = parseFlags(process.argv, process.cwd());
     try {
       await openIdeWindow(initialFlags);
@@ -907,8 +984,12 @@ if (!gotSingleInstanceLock) {
     }
   });
 
+  app.on("will-quit", () => {
+    void tourServer.close();
+  });
+
   app.on("window-all-closed", () => {
-    void intel.dispose().finally(() => {
+    void Promise.allSettled([intel.dispose(), tourServer.close()]).finally(() => {
       app.quit();
     });
   });

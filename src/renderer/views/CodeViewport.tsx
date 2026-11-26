@@ -71,6 +71,12 @@ export interface CodeViewportProps {
   findOpenTrigger?: number;
   annotateTrigger?: number;
   fontSizePx?: number;
+  spotlight?: {
+    startLine: number;
+    endLine: number;
+    card?: React.ReactNode;
+    seq?: string;
+  } | null;
 }
 
 interface FindMatch {
@@ -312,6 +318,7 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
       findOpenTrigger,
       annotateTrigger,
       fontSizePx = 13.5,
+      spotlight = null,
     },
     ref,
   ) => {
@@ -425,6 +432,13 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
         column: scrollToRequest.column,
       });
     }, [scrollToRequest?.seq, scrollToRequest?.line]);
+
+    // Walkthrough spotlight auto-scroll
+    useEffect(() => {
+      if (!spotlight || doc.lines.length === 0) return;
+      const anchor = Math.max(1, Math.min(doc.lines.length, spotlight.endLine));
+      virtualizer.scrollToIndex(anchor - 1, { align: "center" });
+    }, [spotlight?.seq, spotlight?.startLine, spotlight?.endLine, doc.lines.length]);
 
     // Flash decay
     useEffect(() => {
@@ -729,7 +743,7 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
     return (
       <div
         ref={rootRef}
-        className={`code-viewport ${updatedPulse ? "pulse-updated" : ""}`}
+        className={`code-viewport ${updatedPulse ? "pulse-updated" : ""} ${spotlight ? "has-spotlight" : ""}`}
         tabIndex={0}
         onKeyDown={handleViewportKeyDown}
       >
@@ -924,6 +938,15 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
               const isLineUpdated =
                 updatedPulse &&
                 (gitMarker === "added" || gitMarker === "modified");
+              const isSpotlighted =
+                spotlight !== null &&
+                lineNumber >= spotlight.startLine &&
+                lineNumber <= spotlight.endLine;
+              const spotlightAnchorLine = spotlight
+                ? Math.max(1, Math.min(doc.lines.length, spotlight.endLine))
+                : null;
+              const showSpotlightCardHere =
+                spotlightAnchorLine === lineNumber && Boolean(spotlight?.card);
 
               const lineMatches = matchesByLine.get(lineNumber) ?? [];
 
@@ -949,6 +972,7 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
                       isSelected ? "selected" : "",
                       isFlashed ? "flash" : "",
                       isLineUpdated ? "pulse-updated" : "",
+                      isSpotlighted ? "tour-spotlight" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
@@ -1054,9 +1078,10 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
                     </div>
                   </div>
 
-                  {/* Inline Annotation Thread & Composer */}
-                  {(threadAnns.length > 0 || showComposerHere) && (
+                  {/* Inline Annotation Thread, Walkthrough Card & Composer */}
+                  {(threadAnns.length > 0 || showComposerHere || showSpotlightCardHere) && (
                     <div className="code-inline-slot">
+                      {showSpotlightCardHere && spotlight?.card}
                       {threadAnns.length > 0 && (
                         <AnnotationThreadCard
                           annotations={threadAnns}

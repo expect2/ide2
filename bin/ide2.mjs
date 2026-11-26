@@ -24,6 +24,10 @@ function printHelp() {
       "  ide2 --diff                   Launch directly in Branch Diff Review mode",
       "  ide2 --worktree api-v2        Focus a named worktree on launch",
       "  ide2 --export                 Print current worktree's Markdown Feedback Prompt to stdout",
+      "  ide2 tour --help              Drive interactive step-by-step codebase walkthroughs",
+      "",
+      "Subcommands:",
+      "  tour                          Agent-driven codebase walkthrough controls (`ide2 tour --help`)",
       "",
       "Options:",
       "  -d, --diff            Open in Diff Review mode",
@@ -81,7 +85,34 @@ function parseCliArgs(argv) {
   return opts;
 }
 
-const opts = parseCliArgs(process.argv.slice(2));
+const rawArgs = process.argv.slice(2);
+
+if (rawArgs[0] === "tour" || rawArgs[0] === "walkthrough") {
+  const tourEntry = resolve(APP_ROOT, "dist/cli/tour.cjs");
+  if (!existsSync(tourEntry)) {
+    process.stderr.write("ide2: build artifacts missing. Run `bun run build` in ide2 first.\n");
+    process.exit(1);
+  }
+  const { runCliTour } = require(tourEntry);
+  Promise.resolve(
+    runCliTour({
+      cwd: process.cwd(),
+      appRoot: APP_ROOT,
+      argv: rawArgs.slice(1),
+    }),
+  )
+    .then((output) => {
+      if (output) {
+        process.stdout.write(output);
+      }
+      process.exit(0);
+    })
+    .catch((err) => {
+      process.stderr.write(`ide2 tour failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    });
+} else {
+const opts = parseCliArgs(rawArgs);
 
 if (opts.help) {
   printHelp();
@@ -162,4 +193,5 @@ if (opts.exportPrompt) {
     child.unref();
     process.exit(0);
   }
+}
 }

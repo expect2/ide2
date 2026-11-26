@@ -109,6 +109,9 @@ describe("matchShortcut — macOS (darwin)", () => {
     expect(matchShortcut(key("N", { metaKey: true, shiftKey: true }), "darwin")).toBe(
       "open-project-window",
     );
+    expect(matchShortcut(key("T", { metaKey: true, shiftKey: true }), "darwin")).toBe(
+      "copy-walkthrough-prompt",
+    );
     expect(matchShortcut(key("w", { metaKey: true }), "darwin")).toBe("close-tab");
     expect(matchShortcut(key("{", { code: "BracketLeft", metaKey: true, shiftKey: true }), "darwin")).toBe(
       "prev-tab",
@@ -177,6 +180,9 @@ describe("matchShortcut — Linux & Windows", () => {
       expect(matchShortcut(key("N", { ctrlKey: true, shiftKey: true }), platform)).toBe(
         "open-project-window",
       );
+      expect(matchShortcut(key("T", { ctrlKey: true, shiftKey: true }), platform)).toBe(
+        "copy-walkthrough-prompt",
+      );
       expect(matchShortcut(key("w", { ctrlKey: true }), platform)).toBe("close-tab");
       expect(matchShortcut(key("\\", { ctrlKey: true }), platform)).toBe("split-right");
     });
@@ -214,5 +220,7 @@ describe("KeymapDispatcher & formatShortcut", () => {
     expect(formatShortcut("tool-project", "linux")).toBe("Alt+1");
     expect(formatShortcut("open-project-window", "darwin")).toBe("⇧⌘N");
     expect(formatShortcut("open-project-window", "win32")).toBe("Ctrl+Shift+N");
+    expect(formatShortcut("copy-walkthrough-prompt", "darwin")).toBe("⇧⌘T");
+    expect(formatShortcut("copy-walkthrough-prompt", "linux")).toBe("Ctrl+Shift+T");
   });
 });
