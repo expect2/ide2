@@ -1,29 +1,30 @@
 # ide2
 
-**A fast, read-only desktop IDE built for reviewing AI-authored code across Git worktrees.**
+**A fast, read-only desktop IDE built for the AI coding era.**
 
 ---
 
-## Motivation
+## Philosophy
 
-The way we write software has changed. When coding agents do most of the typing — often in parallel across multiple Git worktrees — your job shifts from editing text to **navigating the codebase, inspecting diffs, reading specs and plans, and steering the agent with clear feedback**.
+Classic IDEs were designed for a different bottleneck: a single human typing code into a single checkout. Everything in them — autocomplete, inline refactoring, write buffers, embedded terminals — optimizes for *producing characters*.
 
-Traditional IDEs weren't built for this loop:
+In the agentic era, producing code is no longer the bottleneck. Coding agents write, test, and iterate in parallel across multiple Git worktrees. The scarce resource is now **human comprehension, judgment, and architectural direction**.
 
-- **They assume you're editing**, filling the screen with refactorings, formatters, and write-heavy tooling while competing with your agents for filesystem and Git index locks.
-- **They treat worktrees as an afterthought**, forcing you to juggle separate windows or lose track of which branch an agent is touching right now.
-- **They make reviewing specs and giving agent feedback clunky**, leaving you copying file paths, line ranges, and snippets by hand into a terminal prompt.
+`ide2` is built around a clean separation of concerns:
 
-`ide2` is a dedicated companion for agent-driven development: open any Git repository from your terminal, inspect every worktree and diff at a glance, annotate code or Markdown directly, and export structured feedback back to your coding agent in one keystroke.
+- **Agents own the write loop.** Run whatever coding agent you want (Claude Code, Codex, Aider, custom loops) in your terminal or background. `ide2` deliberately has **no built-in AI chat and no code editor** — it is completely agent-agnostic and stays out of your agents' way.
+- **Humans own the understanding & steering loop.** `ide2` is a calm, fast surface for navigating the codebase, inspecting diffs across parallel worktrees, reading specs and plans, and sending crisp, line-anchored feedback back to your agent.
+- **Specs and code are equal citizens.** When agents implement from plans and specs, Markdown documents matter as much as source files. Reviewing *intent* alongside *implementation* happens in the same workspace and the same annotation loop.
+- **Your repository stays clean.** Review notes belong to the human–agent conversation, not as stray `TODO` comments or untracked files inside your repo.
 
 ---
 
 ## Principles
 
-1. **Strictly read-only & lock-safe** — `ide2` never edits source files, never stages changes, and never mutates Git state. Every Git command runs with `--no-optional-locks`, so it will never collide with an agent running in the same worktree.
-2. **Worktrees as a first-class unit** — Parallel agent branches belong in one place. All worktrees of the opened repository appear in an always-visible strip with independent tab sessions, live file-change indicators, and instant switching.
-3. **Closed feedback loop with your agent** — Annotations are stored outside your repository (`~/.expect2-ide/`), automatically re-anchor when the agent shifts lines above them, and compile into a clean Markdown **Feedback Prompt** ready to paste or pipe straight into your agent.
-4. **Familiar, keyboard-first navigation** — Built around JetBrains shortcuts (`Shift+Shift`, `⌘⇧O`, `⌘E`, `⌘⇧F`, `⌘B`, `⌘D`, `F7`) so you can jump across files, symbols, diffs, and worktrees without taking your hands off the keyboard.
+1. **Strictly read-only & lock-safe** — `ide2` never edits source files, never stages changes, and never commits. Every Git command runs with `--no-optional-locks`, so it will never collide with an agent working in the same tree.
+2. **Worktrees as a first-class primitive** — Parallel agent branches belong in one window. All worktrees of the opened repository appear in an always-visible strip with independent tab sessions, live activity indicators, and instant switching.
+3. **Closed feedback loop with your agent** — Annotations live outside your repository (`~/.expect2-ide/`), automatically re-anchor when the agent shifts lines above them, and compile into a clean Markdown **Feedback Prompt** ready to paste or pipe straight into your agent.
+4. **Familiar, keyboard-first navigation** — Built around JetBrains muscle memory (`Shift+Shift`, `⌘⇧O`, `⌘E`, `⌘⇧F`, `⌘B`, `⌘D`, `F7`) so you can move across files, symbols, diffs, and worktrees without reaching for the mouse.
 5. **Fast by default** — Virtualized code and diff viewports, native `ripgrep` full-repo search, Tree-sitter symbol outlines, and live filesystem watching without heavy IDE indexing overhead.
 
 ---
