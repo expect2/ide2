@@ -199,15 +199,16 @@ export const App: React.FC = () => {
     filePath: string;
     seq: number;
   } | null>(null);
-  const [walkthrough, setWalkthrough] = useState<WalkthroughState | null>(null);
-  const [review, setReview] = useState<ReviewSessionState | null>(null);
+  const [walkthroughs, setWalkthroughs] = useState<WalkthroughState[]>([]);
+  const [reviews, setReviews] = useState<ReviewSessionState[]>([]);
+  const [selectedReviewSessionId, setSelectedReviewSessionId] = useState<string>("");
   const [agentMenuOpen, setAgentMenuOpen] = useState<boolean>(false);
   const [viewedStepId, setViewedStepId] = useState<string>("");
   const [folderFocusReq, setFolderFocusReq] = useState<{
     dirPath: string;
     seq: string;
   } | null>(null);
-  const lastNavigatedStepIdRef = useRef<string>("");
+  const lastNavigatedStepBySessionRef = useRef<Record<string, string>>({});
 
   // Navigation History & Recent Files
   const navStackRef = useRef<{ items: NavHistoryEntry[]; index: number }>({
@@ -229,6 +230,26 @@ export const App: React.FC = () => {
   const activeWorktree = useMemo(
     () => worktrees.find((w) => w.path === activeWorktreePath) ?? worktrees[0],
     [worktrees, activeWorktreePath],
+  );
+
+  const activeWtReviews = useMemo(
+    () => reviews.filter((r) => r.worktreePath === activeWorktreePath),
+    [reviews, activeWorktreePath],
+  );
+
+  const review = useMemo(() => {
+    if (activeWtReviews.length === 0) return null;
+    return (
+      activeWtReviews.find((r) => r.sessionId === selectedReviewSessionId) ??
+      activeWtReviews.find((r) => r.awaitingUser) ??
+      activeWtReviews[0] ??
+      null
+    );
+  }, [activeWtReviews, selectedReviewSessionId]);
+
+  const walkthrough = useMemo(
+    () => walkthroughs.find((w) => w.worktreePath === activeWorktreePath) ?? null,
+    [walkthroughs, activeWorktreePath],
   );
 
   const currentSession: WorktreeSessionState = useMemo(() => {
@@ -454,17 +475,16 @@ export const App: React.FC = () => {
     let mounted = true;
     window.ide2
       .getBootstrap()
-      .then(async ({ context: ctx, worktrees: wts, annotations: anns, walkthrough: initialWtTour, review: initialReview }) => {
+      .then(async ({ context: ctx, worktrees: wts, annotations: anns, walkthroughs: initialWtTours, reviews: initialReviews }) => {
         if (!mounted) return;
         setContext(ctx);
         setWorktrees(wts);
         setAnnotations(anns);
-        if (initialWtTour) {
-          setWalkthrough(initialWtTour);
-          setViewedStepId(initialWtTour.activeStepId);
+        if (initialWtTours.length > 0) {
+          setWalkthroughs(initialWtTours);
         }
-        if (initialReview) {
-          setReview(initialReview);
+        if (initialReviews.length > 0) {
+          setReviews(initialReviews);
         }
 
         const initialWt =
@@ -504,12 +524,15 @@ export const App: React.FC = () => {
             }
           }
 
+          const initialWtTour =
+            initialWtTours.find((t) => t.worktreePath === initialWt) ?? initialWtTours[0];
           if (initialWtTour && initialWtTour.steps.length > 0) {
+            setViewedStepId(initialWtTour.activeStepId);
             const activeTourStep =
               initialWtTour.steps.find((s) => s.id === initialWtTour.activeStepId) ??
               initialWtTour.steps[initialWtTour.steps.length - 1];
             if (activeTourStep) {
-              lastNavigatedStepIdRef.current = activeTourStep.id;
+              lastNavigatedStepBySessionRef.current[initialWtTour.sessionId] = activeTourStep.id;
               applyWalkthroughStepNavigation(activeTourStep);
             }
           }
@@ -636,22 +659,41 @@ export const App: React.FC = () => {
       } else if (event.type === "native-shortcut") {
         runActionRef.current(event.action as IdeAction);
       } else if (event.type === "review-updated") {
-        setReview(event.review);
+        setReviews(event.reviews);
       } else if (event.type === "walkthrough-updated") {
-        setWalkthrough(event.walkthrough);
-        if (!event.walkthrough) {
+        setWalkthroughs(event.walkthroughs);
+        if (event.walkthroughs.length === 0) {
           setViewedStepId("");
-          lastNavigatedStepIdRef.current = "";
-        } else if (
-          event.walkthrough.activeStepId &&
-          event.walkthrough.activeStepId !== lastNavigatedStepIdRef.current
-        ) {
-          const nextStep = event.walkthrough.steps.find(
-            (s) => s.id === event.walkthrough!.activeStepId,
+          lastNavigatedStepBySessionRef.current = {};
+        } else {
+          // Prune ended session cursors
+          const liveIds = new Set(event.walkthroughs.map((w) => w.sessionId));
+          for (const id of Object.keys(lastNavigatedStepBySessionRef.current)) {
+            if (!liveIds.has(id)) delete lastNavigatedStepBySessionRef.current[id];
+          }
+          // Prefer navigating the tour on the currently viewed worktree; if none is active here,
+          // follow the newly updated tour so single-tour UX switches worktrees automatically
+          // without hijacking an active tour in another worktree.
+          const curWtTour = event.walkthroughs.find(
+            (w) => w.worktreePath === activeWtRef.current,
           );
-          if (nextStep) {
-            lastNavigatedStepIdRef.current = nextStep.id;
-            applyWalkthroughStepNavigation(nextStep);
+          const candidate =
+            curWtTour ??
+            event.walkthroughs.find(
+              (w) =>
+                w.activeStepId &&
+                w.activeStepId !== lastNavigatedStepBySessionRef.current[w.sessionId],
+            );
+          if (
+            candidate &&
+            candidate.activeStepId &&
+            candidate.activeStepId !== lastNavigatedStepBySessionRef.current[candidate.sessionId]
+          ) {
+            const nextStep = candidate.steps.find((s) => s.id === candidate.activeStepId);
+            if (nextStep) {
+              lastNavigatedStepBySessionRef.current[candidate.sessionId] = nextStep.id;
+              applyWalkthroughStepNavigation(nextStep);
+            }
           }
         }
       }
@@ -742,6 +784,7 @@ export const App: React.FC = () => {
     async (opts?: { includeOutdated?: boolean; resolveAfterSend?: boolean }) => {
       if (!activeWorktreePath) return;
       const res = await window.ide2.sendReviewResponse({
+        sessionId: review?.sessionId,
         action: "feedback",
         worktreePath: activeWorktreePath,
         includeOutdated: opts?.includeOutdated,
@@ -755,25 +798,27 @@ export const App: React.FC = () => {
         `Sent ${res.count} annotation${res.count === 1 ? "" : "s"} directly to coding agent`,
       );
     },
-    [activeWorktreePath, review?.resolveOnSend, showToast],
+    [activeWorktreePath, review?.resolveOnSend, review?.sessionId, showToast],
   );
 
   const handleApproveReview = useCallback(async () => {
     if (!activeWorktreePath) return;
     await window.ide2.sendReviewResponse({
+      sessionId: review?.sessionId,
       action: "approve",
       worktreePath: activeWorktreePath,
     });
     showToast("Approved — notified coding agent");
-  }, [activeWorktreePath, showToast]);
+  }, [activeWorktreePath, review?.sessionId, showToast]);
 
   const handleCancelReview = useCallback(async () => {
     if (!activeWorktreePath) return;
     await window.ide2.sendReviewResponse({
+      sessionId: review?.sessionId,
       action: "cancel",
       worktreePath: activeWorktreePath,
     });
-  }, [activeWorktreePath]);
+  }, [activeWorktreePath, review?.sessionId]);
 
   useEffect(() => {
     if (!agentMenuOpen) return;
@@ -1195,18 +1240,22 @@ export const App: React.FC = () => {
         }}
         onAdvance={() =>
           window.ide2.respondWalkthrough({
+            sessionId: walkthrough.sessionId,
+            worktreePath: walkthrough.worktreePath,
             stepId: step.id,
             action: step.final ? "finish" : "next",
           })
         }
         onSteer={(message) =>
           window.ide2.respondWalkthrough({
+            sessionId: walkthrough.sessionId,
+            worktreePath: walkthrough.worktreePath,
             stepId: step.id,
             action: "steer",
             message,
           })
         }
-        onStop={() => window.ide2.endWalkthrough()}
+        onStop={() => window.ide2.endWalkthrough(walkthrough.sessionId)}
         onOpenRepoTarget={(rawTarget) => {
           const cleaned = rawTarget.replace(/^\/+/, "");
           const match = /^(.*?):(\d+)/.exec(cleaned);
@@ -1510,6 +1559,8 @@ export const App: React.FC = () => {
         worktrees={worktrees}
         activeWorktreePath={activeWorktreePath}
         annotations={annotations}
+        reviews={reviews}
+        walkthroughs={walkthroughs}
         platform={platform}
         onSelectWorktree={(wtPath) => setActiveWorktreePath(wtPath)}
         onCreateWorktree={async (params) => {
@@ -1840,7 +1891,9 @@ export const App: React.FC = () => {
       {review && (
         <ReviewSessionBar
           review={review}
+          peerReviews={activeWtReviews}
           openAnnotationCount={openWtAnnotationCount}
+          onSelectSession={setSelectedReviewSessionId}
           onSendFeedback={() => handleSendReviewFeedback()}
           onApprove={() => handleApproveReview()}
           onCancel={() => handleCancelReview()}
@@ -1853,7 +1906,7 @@ export const App: React.FC = () => {
           walkthrough={walkthrough}
           viewedStepId={viewedWalkthroughStep.id}
           onSelectStep={(s) => applyWalkthroughStepNavigation(s)}
-          onEndWalkthrough={() => window.ide2.endWalkthrough()}
+          onEndWalkthrough={() => window.ide2.endWalkthrough(walkthrough.sessionId)}
         />
       )}
 

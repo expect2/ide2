@@ -4,7 +4,9 @@ import { MORPH_FRAMES, MORPH_INTERVAL_MS } from "../shell/WorktreeStrip.js";
 
 export interface ReviewSessionBarProps {
   review: ReviewSessionState;
+  peerReviews?: readonly ReviewSessionState[];
   openAnnotationCount: number;
+  onSelectSession?: (sessionId: string) => void;
   onSendFeedback: () => void | Promise<void>;
   onApprove: () => void | Promise<void>;
   onCancel: () => void | Promise<void>;
@@ -12,7 +14,9 @@ export interface ReviewSessionBarProps {
 
 export const ReviewSessionBar: React.FC<ReviewSessionBarProps> = ({
   review,
+  peerReviews,
   openAnnotationCount,
+  onSelectSession,
   onSendFeedback,
   onApprove,
   onCancel,
@@ -26,6 +30,8 @@ export const ReviewSessionBar: React.FC<ReviewSessionBarProps> = ({
     }, MORPH_INTERVAL_MS);
     return () => window.clearInterval(t);
   }, [review.agentWorking]);
+
+  const showSessionSwitcher = Boolean(peerReviews && peerReviews.length > 1 && onSelectSession);
 
   return (
     <div
@@ -49,11 +55,49 @@ export const ReviewSessionBar: React.FC<ReviewSessionBarProps> = ({
             <span style={{ color: "#ffffff", fontWeight: 600 }}>
               Agent connected & waiting for review
             </span>
-            {review.label && <span className="wt-target-badge">{review.label}</span>}
+            {review.label && !showSessionSwitcher && (
+              <span className="wt-target-badge">{review.label}</span>
+            )}
             {review.round > 0 && (
               <span className="wt-target-badge">Round {review.round + 1}</span>
             )}
           </>
+        )}
+
+        {showSessionSwitcher && peerReviews && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", marginLeft: "6px" }}>
+            {peerReviews.map((s, idx) => {
+              const selected = s.sessionId === review.sessionId;
+              return (
+                <button
+                  key={s.sessionId}
+                  type="button"
+                  onClick={() => onSelectSession?.(s.sessionId)}
+                  className="btn btn-ghost"
+                  style={{
+                    height: "21px",
+                    padding: "0 7px",
+                    fontSize: "11px",
+                    background: selected ? "var(--selection, #2e436e)" : "rgba(255,255,255,0.04)",
+                    borderColor: selected ? "rgba(94, 148, 255, 0.55)" : "var(--faint)",
+                    color: selected ? "#ffffff" : "var(--dim)",
+                  }}
+                  title={`Target review session ${s.label || `#${idx + 1}`} (${s.sessionId})`}
+                >
+                  <span
+                    style={{
+                      width: "6px",
+                      height: "6px",
+                      borderRadius: "50%",
+                      background: s.awaitingUser ? "var(--safe)" : "var(--unknown)",
+                      display: "inline-block",
+                    }}
+                  />
+                  <span>{s.label || `Agent #${idx + 1}`}</span>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
 

@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { Annotation, WorktreeInfo } from "../../shared/protocol.js";
+import type {
+  Annotation,
+  ReviewSessionState,
+  WalkthroughState,
+  WorktreeInfo,
+} from "../../shared/protocol.js";
 import { Expect2Wordmark, IconGitBranch } from "../components/BrandMark.js";
 import { formatShortcut, type Platform } from "./keymap.js";
 
@@ -11,6 +16,8 @@ export interface WorktreeStripProps {
   worktrees: readonly WorktreeInfo[];
   activeWorktreePath: string;
   annotations: readonly Annotation[];
+  reviews?: readonly ReviewSessionState[];
+  walkthroughs?: readonly WalkthroughState[];
   platform: Platform;
   onSelectWorktree: (worktreePath: string) => void;
   onCreateWorktree: (params: {
@@ -52,6 +59,8 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
   worktrees,
   activeWorktreePath,
   annotations,
+  reviews,
+  walkthroughs,
   platform,
   onSelectWorktree,
   onCreateWorktree,
@@ -78,8 +87,10 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
   );
 
   const hasRecentActivity = useMemo(
-    () => worktrees.some((wt) => now - wt.lastActivityAt < ACTIVE_WINDOW_MS),
-    [worktrees, now],
+    () =>
+      worktrees.some((wt) => now - wt.lastActivityAt < ACTIVE_WINDOW_MS) ||
+      (reviews?.some((r) => r.agentWorking) ?? false),
+    [worktrees, reviews, now],
   );
 
   useEffect(() => {
@@ -254,6 +265,12 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
           const spinner = MORPH_FRAMES[morphFrame] ?? "▣";
           const changedCount = getWorktreeChangedCount(wt);
           const openAnnCount = openAnnotationsByWorktree.get(wt.path) ?? 0;
+          const wtReviews = (reviews ?? []).filter((r) => r.worktreePath === wt.path);
+          const waitingReviews = wtReviews.filter((r) => r.awaitingUser);
+          const workingReviews = wtReviews.filter((r) => r.agentWorking);
+          const wtTour = (walkthroughs ?? []).find(
+            (w) => w.worktreePath === wt.path && w.steps.length > 0,
+          );
 
           return (
             <div
@@ -337,7 +354,63 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
                   {wt.ahead > 0 ? ` ↑${wt.ahead}` : ""}
                 </span>
 
-                {isLive && (
+                {waitingReviews.length > 0 ? (
+                  <span
+                    title={
+                      waitingReviews.length === 1
+                        ? `Agent connected & waiting for review${waitingReviews[0]?.label ? ` (${waitingReviews[0].label})` : ""}`
+                        : `${waitingReviews.length} agents waiting for review on this worktree`
+                    }
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "3px",
+                    }}
+                  >
+                    <span className="review-live-dot" aria-hidden="true" />
+                    {waitingReviews.length > 1 && (
+                      <span
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: "10px",
+                          color: "var(--safe)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {waitingReviews.length}
+                      </span>
+                    )}
+                  </span>
+                ) : workingReviews.length > 0 ? (
+                  <span
+                    className="ide2-morph-spinner"
+                    title="Connected coding agent is addressing your review feedback…"
+                    style={{
+                      fontFamily: "var(--mono)",
+                      fontSize: "11px",
+                      color: "var(--unknown)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {spinner}
+                  </span>
+                ) : null}
+
+                {wtTour && (
+                  <span
+                    title={`Walkthrough active${wtTour.title ? `: ${wtTour.title}` : ""}`}
+                    style={{
+                      fontFamily: "var(--mono)",
+                      fontSize: "10px",
+                      color: isActive ? "#b8d0ff" : "#7fa4ff",
+                      fontWeight: 700,
+                    }}
+                  >
+                    ▶
+                  </span>
+                )}
+
+                {isLive && workingReviews.length === 0 && (
                   <span
                     className="ide2-morph-spinner"
                     title={`Agent activity ${formatRelativeActivity(wt.lastActivityAt, now)} ago`}

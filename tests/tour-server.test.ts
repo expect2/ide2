@@ -161,7 +161,7 @@ describe("Agent-Driven Codebase Walkthrough (`ide2 tour`)", () => {
     const canonRepo = realpathSync(repoDir);
     const canonCommonDir = realpathSync(join(canonRepo, ".git"));
 
-    const broadcasts: Array<WalkthroughState | null> = [];
+    const broadcasts: Array<WalkthroughState[]> = [];
     const server = new TourServer(
       {
         ensureRepoWindow: async () => ({
@@ -170,8 +170,8 @@ describe("Agent-Driven Codebase Walkthrough (`ide2 tour`)", () => {
           worktreePath: canonRepo,
           worktrees: [],
         }),
-        broadcastWalkthrough: (_commonDir, state) => {
-          broadcasts.push(state ? structuredClone(state) : null);
+        broadcastWalkthrough: (_commonDir, states) => {
+          broadcasts.push(structuredClone(states));
         },
       },
       runDir,
@@ -353,7 +353,7 @@ describe("Agent-Driven Codebase Walkthrough (`ide2 tour`)", () => {
     const canonRepo = realpathSync(repoDir);
     const canonCommonDir = realpathSync(join(canonRepo, ".git"));
 
-    const reviewBroadcasts: Array<ReviewSessionState | null> = [];
+    const reviewBroadcasts: Array<ReviewSessionState[]> = [];
     const seenDiffFlags: Array<boolean | undefined> = [];
     const server = new TourServer(
       {
@@ -367,8 +367,8 @@ describe("Agent-Driven Codebase Walkthrough (`ide2 tour`)", () => {
           };
         },
         broadcastWalkthrough: () => {},
-        broadcastReview: (_commonDir, state) => {
-          reviewBroadcasts.push(state ? structuredClone(state) : null);
+        broadcastReview: (_commonDir, states) => {
+          reviewBroadcasts.push(structuredClone(states));
         },
       },
       runDir,
@@ -479,5 +479,216 @@ describe("Agent-Driven Codebase Walkthrough (`ide2 tour`)", () => {
     expect(await waitToEndPromise).toBe("ACTION: cancel\nROUND: 0\n");
     expect(server.getReviewState(canonCommonDir)).toBeNull();
     expect(reviewBroadcasts.length).toBeGreaterThan(0);
+  });
+
+  it("isolates concurrent agents across multiple worktrees, multiple repos, and same-worktree multi-agent sessions", async () => {
+    const root = makeShortTempDir("ide2-multi-");
+    const runDir = join(root, "run");
+
+    // Repo A with two worktrees: wt-auth (main) and wt-billing (linked worktree)
+    const repoA = join(root, "repo-a");
+    const wtBilling = join(root, "wt-billing");
+    const wtOther = join(root, "wt-other");
+    mkdirSync(repoA, { recursive: true });
+    git(repoA, ["init", "-b", "main"]);
+    git(repoA, ["config", "user.email", "test@example.com"]);
+    git(repoA, ["config", "user.name", "Multi Tester"]);
+    writeFileSync(join(repoA, "auth.ts"), "export const auth = 1;\n", "utf8");
+    git(repoA, ["add", "."]);
+    git(repoA, ["commit", "-m", "init A"]);
+    git(repoA, ["worktree", "add", "-b", "feat/billing", wtBilling]);
+    writeFileSync(join(wtBilling, "billing.ts"), "export const bill = 2;\n", "utf8");
+    git(repoA, ["worktree", "add", "-b", "feat/other", wtOther]);
+
+    // Repo B (separate window)
+    const repoB = join(root, "repo-b");
+    mkdirSync(repoB, { recursive: true });
+    git(repoB, ["init", "-b", "main"]);
+    git(repoB, ["config", "user.email", "test@example.com"]);
+    git(repoB, ["config", "user.name", "Multi Tester"]);
+    writeFileSync(join(repoB, "index.ts"), "export const b = 3;\n", "utf8");
+    git(repoB, ["add", "."]);
+    git(repoB, ["commit", "-m", "init B"]);
+
+    const canonRepoA = realpathSync(repoA);
+    const canonCommonA = realpathSync(join(canonRepoA, ".git"));
+    const canonWtBilling = realpathSync(wtBilling);
+    const canonWtOther = realpathSync(wtOther);
+    const canonRepoB = realpathSync(repoB);
+    const canonCommonB = realpathSync(join(canonRepoB, ".git"));
+
+    const server = new TourServer(
+      {
+        ensureRepoWindow: async ({ cwd }) => {
+          const canonCwd = realpathSync(cwd);
+          if (canonCwd.startsWith(canonRepoB)) {
+            return {
+              repoCommonDir: canonCommonB,
+              repoName: "repo-b",
+              worktreePath: canonRepoB,
+              worktrees: [],
+            };
+          }
+          const wtPath = canonCwd.startsWith(canonWtBilling)
+            ? canonWtBilling
+            : canonCwd.startsWith(canonWtOther)
+              ? canonWtOther
+              : canonRepoA;
+          return {
+            repoCommonDir: canonCommonA,
+            repoName: "repo-a",
+            worktreePath: wtPath,
+            worktrees: [],
+          };
+        },
+        broadcastWalkthrough: () => {},
+        broadcastReview: () => {},
+      },
+      runDir,
+    );
+    activeServers.push(server);
+    await server.listen();
+
+    // 1. Two agents simultaneously wait on DIFFERENT worktrees of Repo A + a third agent waits on Repo B
+    const agentAuthPromise = runCliReview({
+      cwd: canonRepoA,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["wait", "--label", "Auth Agent"],
+    });
+    const agentBillingPromise = runCliReview({
+      cwd: canonWtBilling,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["wait", "--label", "Billing Agent"],
+    });
+    const agentRepoBPromise = runCliReview({
+      cwd: canonRepoB,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["wait", "--label", "RepoB Agent"],
+    });
+
+    await waitFor(() => {
+      const aStates = server.getReviewStates(canonCommonA);
+      const bStates = server.getReviewStates(canonCommonB);
+      return aStates.length === 2 && bStates.length === 1 ? true : null;
+    });
+
+    // Sending feedback for an unrelated worktree (`wt-other`) MUST return false — zero cross-talk!
+    expect(
+      server.respondReviewFromUser(canonCommonA, {
+        worktreePath: canonWtOther,
+        action: "feedback",
+        count: 1,
+        markdown: "Should never leak",
+      }),
+    ).toBe(false);
+
+    // Send feedback specifically to `wt-auth` — only Auth Agent receives it; Billing Agent keeps waiting!
+    expect(
+      server.respondReviewFromUser(canonCommonA, {
+        worktreePath: canonRepoA,
+        action: "feedback",
+        count: 1,
+        markdown: "Fix auth.ts:1",
+      }),
+    ).toBe(true);
+
+    expect(await agentAuthPromise).toBe("ACTION: feedback\nROUND: 1\nANNOTATIONS: 1\n\nFix auth.ts:1\n");
+    expect(server.getReviewState(canonCommonA, canonRepoA)?.agentWorking).toBe(true);
+    expect(server.getReviewState(canonCommonA, canonWtBilling)?.awaitingUser).toBe(true);
+
+    // 2. Two agents simultaneously wait on the EXACT SAME worktree (`wt-billing`) -> neither evicts the other!
+    const agentBilling2Promise = runCliReview({
+      cwd: canonWtBilling,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["wait", "--label", "Billing Agent 2"],
+    });
+
+    const billingPair = await waitFor(() => {
+      const list = server
+        .getReviewStates(canonCommonA)
+        .filter((s) => s.worktreePath === canonWtBilling);
+      return list.length === 2 ? list : null;
+    });
+    const firstBilling = billingPair.find((s) => s.label === "Billing Agent")!;
+    const secondBilling = billingPair.find((s) => s.label === "Billing Agent 2")!;
+    expect(firstBilling.sessionId).not.toBe(secondBilling.sessionId);
+
+    // Approve secondBilling by sessionId; firstBilling stays connected, then send feedback to firstBilling!
+    expect(
+      server.respondReviewFromUser(canonCommonA, {
+        sessionId: secondBilling.sessionId,
+        worktreePath: canonWtBilling,
+        action: "approve",
+        count: 0,
+      }),
+    ).toBe(true);
+    expect(await agentBilling2Promise).toBe("ACTION: approved\nROUND: 0\n");
+
+    expect(
+      server.respondReviewFromUser(canonCommonA, {
+        sessionId: firstBilling.sessionId,
+        worktreePath: canonWtBilling,
+        action: "feedback",
+        count: 1,
+        markdown: "Fix billing.ts:1",
+      }),
+    ).toBe(true);
+    expect(await agentBillingPromise).toBe("ACTION: feedback\nROUND: 1\nANNOTATIONS: 1\n\nFix billing.ts:1\n");
+
+    // 3. Concurrent walkthroughs on `wt-auth` and `wt-billing` stay isolated
+    const tourAuthPromise = runCliTour({
+      cwd: canonRepoA,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["step", "--target", "auth.ts", "--title", "Auth Tour", "--body", "Explaining auth"],
+    });
+    const tourBillingPromise = runCliTour({
+      cwd: canonWtBilling,
+      appRoot: APP_ROOT,
+      runDir,
+      autoLaunch: false,
+      argv: ["step", "--target", "billing.ts", "--title", "Billing Tour", "--body", "Explaining billing"],
+    });
+
+    const bothTours = await waitFor(() => {
+      const tours = server.getWalkthroughStates(canonCommonA);
+      return tours.length === 2 ? tours : null;
+    });
+    const authTour = bothTours.find((t) => t.worktreePath === canonRepoA)!;
+    const billingTour = bothTours.find((t) => t.worktreePath === canonWtBilling)!;
+
+    // Advance ONLY authTour -> billingTour remains awaitingUser!
+    server.respondFromUser(canonCommonA, {
+      sessionId: authTour.sessionId,
+      worktreePath: canonRepoA,
+      stepId: authTour.activeStepId,
+      action: "finish",
+    });
+    expect(await tourAuthPromise).toBe("ACTION: finish\nSTEP: 1\n");
+    expect(server.getState(canonCommonA, canonWtBilling)?.awaitingUser).toBe(true);
+
+    // 4. Closing Repo A's window cancels Repo A's remaining billing tour, while Repo B's review stays alive!
+    server.closeRepo(canonCommonA);
+    expect(await tourBillingPromise).toBe("ACTION: stop\nSTEP: 1\n");
+    expect(server.getReviewState(canonCommonB, canonRepoB)?.awaitingUser).toBe(true);
+
+    // Finally approve Repo B's agent cleanly
+    expect(
+      server.respondReviewFromUser(canonCommonB, {
+        worktreePath: canonRepoB,
+        action: "approve",
+        count: 0,
+      }),
+    ).toBe(true);
+    expect(await agentRepoBPromise).toBe("ACTION: approved\nROUND: 0\n");
   });
 });

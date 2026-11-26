@@ -87,6 +87,7 @@ interface ParsedTourCli {
   base?: string;
   markdownMode?: "preview" | "split" | "raw";
   worktree?: string;
+  sessionId?: string;
   final?: boolean;
   wait: boolean;
   waitTimeoutSec: number;
@@ -163,6 +164,10 @@ export function parseTourArgs(argv: readonly string[]): ParsedTourCli {
       parsed.worktree = argv[++i];
     } else if (arg.startsWith("--worktree=")) {
       parsed.worktree = arg.slice("--worktree=".length);
+    } else if (arg === "--session" && argv[i + 1] !== undefined) {
+      parsed.sessionId = argv[++i];
+    } else if (arg.startsWith("--session=")) {
+      parsed.sessionId = arg.slice("--session=".length);
     } else if (arg === "--final") {
       parsed.final = true;
     } else if (arg === "--no-wait") {
@@ -548,6 +553,7 @@ export async function runCliTour(options: RunCliTourOptions): Promise<string> {
       {
         cwd: options.cwd,
         worktree: parsed.worktree,
+        sessionId: parsed.sessionId,
         title: parsed.title,
         totalSteps: parsed.totalSteps,
       },
@@ -575,6 +581,7 @@ export async function runCliTour(options: RunCliTourOptions): Promise<string> {
       {
         cwd: options.cwd,
         worktree: parsed.worktree,
+        sessionId: parsed.sessionId,
         target: parsed.target,
         line: parsed.line,
         endLine: parsed.endLine,
@@ -604,6 +611,8 @@ export async function runCliTour(options: RunCliTourOptions): Promise<string> {
       "tour.wait",
       {
         cwd: options.cwd,
+        worktree: parsed.worktree,
+        sessionId: parsed.sessionId,
         waitTimeoutMs,
       },
     );
@@ -615,12 +624,20 @@ export async function runCliTour(options: RunCliTourOptions): Promise<string> {
       conn.paths,
       conn.token,
       "tour.status",
-      { cwd: options.cwd },
+      {
+        cwd: options.cwd,
+        worktree: parsed.worktree,
+        sessionId: parsed.sessionId,
+      },
     );
     return `${JSON.stringify(res, null, 2)}\n`;
   }
 
-  await sendTourRpc(conn.paths, conn.token, "tour.end", { cwd: options.cwd });
+  await sendTourRpc(conn.paths, conn.token, "tour.end", {
+    cwd: options.cwd,
+    worktree: parsed.worktree,
+    sessionId: parsed.sessionId,
+  });
   return "ACTION: ended\n";
 }
 
@@ -629,15 +646,16 @@ export function formatReviewHelp(): string {
     "ide2 review — receive live code review feedback directly from ide2 (no copy/paste)",
     "",
     "Usage:",
-    "  ide2 review wait [--worktree <name>] [--label <text>] [--diff] [--resolve] [--wait-timeout <sec>]",
-    "  ide2 review status",
-    "  ide2 review end",
+    "  ide2 review wait [--worktree <name>] [--label <text>] [--session <id>] [--diff] [--resolve] [--wait-timeout <sec>]",
+    "  ide2 review status [--worktree <name>] [--session <id>]",
+    "  ide2 review end [--worktree <name>] [--session <id>]",
     "  ide2 review prompt",
     "  ide2 review install-skill [--dir <path>] [--claude]",
     "",
     "Options:",
     "  -w, --worktree <name>     Target worktree name, branch, or path",
     "      --label <text>        Optional label shown in ide2's review bar (e.g. \"Auth refactor\")",
+    "      --session <id>        Optional session ID to target a specific agent on the same worktree",
     "  -d, --diff                Open ide2 directly in Git Diff view",
     "      --resolve             Mark sent annotations as resolved automatically (default: on)",
     "      --no-resolve          Keep sent annotations open in ide2 after sending",
@@ -740,6 +758,7 @@ export async function runCliReview(options: RunCliTourOptions): Promise<string> 
   }
 
   let worktree: string | undefined;
+  let sessionId: string | undefined;
   let label: string | undefined;
   let diff = false;
   let resolveOnSend = true;
@@ -755,6 +774,10 @@ export async function runCliReview(options: RunCliTourOptions): Promise<string> 
       worktree = options.argv[++i];
     } else if (arg.startsWith("--worktree=")) {
       worktree = arg.slice("--worktree=".length);
+    } else if (arg === "--session" && options.argv[i + 1] !== undefined) {
+      sessionId = options.argv[++i];
+    } else if (arg.startsWith("--session=")) {
+      sessionId = arg.slice("--session=".length);
     } else if (arg === "--label" && options.argv[i + 1] !== undefined) {
       label = options.argv[++i];
     } else if (arg.startsWith("--label=")) {
@@ -798,13 +821,21 @@ export async function runCliReview(options: RunCliTourOptions): Promise<string> 
       conn.paths,
       conn.token,
       "review.status",
-      { cwd: options.cwd },
+      {
+        cwd: options.cwd,
+        worktree,
+        sessionId,
+      },
     );
     return `${JSON.stringify(res, null, 2)}\n`;
   }
 
   if (sub === "end") {
-    await sendTourRpc(conn.paths, conn.token, "review.end", { cwd: options.cwd });
+    await sendTourRpc(conn.paths, conn.token, "review.end", {
+      cwd: options.cwd,
+      worktree,
+      sessionId,
+    });
     return "ACTION: ended\n";
   }
 
@@ -820,6 +851,7 @@ export async function runCliReview(options: RunCliTourOptions): Promise<string> 
     {
       cwd: options.cwd,
       worktree,
+      sessionId,
       label,
       diff,
       resolveOnSend,

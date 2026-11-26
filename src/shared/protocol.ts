@@ -299,6 +299,8 @@ export interface WalkthroughStep {
 export type WalkthroughUserAction = "next" | "steer" | "stop" | "finish";
 
 export interface WalkthroughUserResponse {
+  sessionId?: string;
+  worktreePath?: string;
   stepId: string;
   action: WalkthroughUserAction;
   message?: string;
@@ -319,6 +321,7 @@ export interface WalkthroughState {
 export type ReviewUserAction = "feedback" | "approve" | "cancel";
 
 export interface ReviewUserResponse {
+  sessionId?: string;
   action: ReviewUserAction;
   worktreePath: string;
   includeOutdated?: boolean;
@@ -371,11 +374,11 @@ export type WorkspaceEvent =
     }
   | {
       type: "walkthrough-updated";
-      walkthrough: WalkthroughState | null;
+      walkthroughs: WalkthroughState[];
     }
   | {
       type: "review-updated";
-      review: ReviewSessionState | null;
+      reviews: ReviewSessionState[];
     };
 
 export interface Ide2Bridge {
@@ -383,8 +386,8 @@ export interface Ide2Bridge {
     context: LaunchContext;
     worktrees: WorktreeInfo[];
     annotations: Annotation[];
-    walkthrough: WalkthroughState | null;
-    review: ReviewSessionState | null;
+    walkthroughs: WalkthroughState[];
+    reviews: ReviewSessionState[];
   }>;
   listFiles(worktreePath: string): Promise<FileEntry[]>;
   fuzzyFindFiles(params: {
@@ -425,7 +428,7 @@ export interface Ide2Bridge {
   openProjectWindow(targetPath?: string): Promise<OpenProjectResult>;
   listRecentProjects(): Promise<RecentProject[]>;
   respondWalkthrough(response: WalkthroughUserResponse): Promise<void>;
-  endWalkthrough(): Promise<void>;
+  endWalkthrough(sessionId?: string): Promise<void>;
   getWalkthroughAgentPrompt(): Promise<string>;
   sendReviewResponse(response: ReviewUserResponse): Promise<{ sent: boolean; count: number }>;
   getReviewAgentPrompt(): Promise<string>;

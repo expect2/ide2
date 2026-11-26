@@ -42,13 +42,14 @@ export interface TourHostAdapter {
     worktreePath: string;
     worktrees: WorktreeInfo[];
   }>;
-  broadcastWalkthrough(repoCommonDir: string, state: WalkthroughState | null): void;
-  broadcastReview?: (repoCommonDir: string, state: ReviewSessionState | null) => void;
+  broadcastWalkthrough(repoCommonDir: string, walkthroughs: WalkthroughState[]): void;
+  broadcastReview?: (repoCommonDir: string, reviews: ReviewSessionState[]) => void;
 }
 
 export interface TourStartParams {
   cwd: string;
   worktree?: string;
+  sessionId?: string;
   title?: string;
   totalSteps?: number;
 }
@@ -56,6 +57,7 @@ export interface TourStartParams {
 export interface TourStepParams {
   cwd: string;
   worktree?: string;
+  sessionId?: string;
   target?: string;
   line?: number;
   endLine?: number;
@@ -73,6 +75,8 @@ export interface TourStepParams {
 
 export interface TourWaitParams {
   cwd: string;
+  worktree?: string;
+  sessionId?: string;
   waitTimeoutMs?: number;
 }
 
@@ -110,6 +114,7 @@ interface RepoTourSession {
 export interface ReviewWaitParams {
   cwd: string;
   worktree?: string;
+  sessionId?: string;
   label?: string;
   diff?: boolean;
   resolveOnSend?: boolean;
@@ -509,18 +514,133 @@ export class TourServer {
     }
   }
 
-  getState(repoCommonDir: string): WalkthroughState | null {
-    const canon = existsSync(repoCommonDir) ? realpathSync(repoCommonDir) : repoCommonDir;
-    const session = this.sessions.get(canon);
-    if (!session || session.steps.length === 0) {
+  private canonPath(p: string): string {
+    try {
+      return existsSync(p) ? realpathSync(p) : resolve(p);
+    } catch {
+      return resolve(p);
+    }
+  }
+
+  private isTourEndedBuffered(session: RepoTourSession): boolean {
+    return Boolean(
+      session.bufferedResponse &&
+        (session.bufferedResponse.action === "finish" || session.bufferedResponse.action === "stop"),
+    );
+  }
+
+  private isReviewEndedBuffered(session: RepoReviewSession): boolean {
+    return Boolean(
+      session.bufferedResponse &&
+        (session.bufferedResponse.action === "approve" || session.bufferedResponse.action === "cancel"),
+    );
+  }
+
+  private broadcastRepoWalkthroughs(repoCommonDir: string): void {
+    const canonRepo = this.canonPath(repoCommonDir);
+    this.host.broadcastWalkthrough(canonRepo, this.getWalkthroughStates(canonRepo));
+  }
+
+  private broadcastRepoReviews(repoCommonDir: string): void {
+    const canonRepo = this.canonPath(repoCommonDir);
+    this.host.broadcastReview?.(canonRepo, this.getReviewStates(canonRepo));
+  }
+
+  /** Cleanly terminate any waiting tours or review sessions when a repository's last window closes. */
+  closeRepo(repoCommonDir: string): void {
+    const canonRepo = this.canonPath(repoCommonDir);
+    for (const [id, session] of Array.from(this.sessions.entries())) {
+      if (session.repoCommonDir !== canonRepo) continue;
+      if (session.waiter) {
+        if (session.waiter.timer) clearTimeout(session.waiter.timer);
+        session.waiter.resolve({
+          status: "responded",
+          sessionId: session.sessionId,
+          stepId: session.waiter.stepId,
+          stepNumber: session.waiter.stepNumber,
+          action: "stop",
+        });
+        session.waiter = null;
+      }
+      this.sessions.delete(id);
+    }
+    for (const [id, rev] of Array.from(this.reviewSessions.entries())) {
+      if (rev.repoCommonDir !== canonRepo) continue;
+      if (rev.waiter) {
+        if (rev.waiter.timer) clearTimeout(rev.waiter.timer);
+        rev.waiter.resolve({
+          status: "responded",
+          sessionId: rev.sessionId,
+          round: rev.round,
+          action: "cancel",
+        });
+        rev.waiter = null;
+      }
+      this.reviewSessions.delete(id);
+    }
+  }
+
+  getWalkthroughStates(repoCommonDir: string): WalkthroughState[] {
+    const canonRepo = this.canonPath(repoCommonDir);
+    const out: WalkthroughState[] = [];
+    for (const session of this.sessions.values()) {
+      if (
+        session.repoCommonDir === canonRepo &&
+        session.steps.length > 0 &&
+        !this.isTourEndedBuffered(session)
+      ) {
+        out.push(this.toPublicState(session));
+      }
+    }
+    return out;
+  }
+
+  getState(repoCommonDir: string, worktreePath?: string, sessionId?: string): WalkthroughState | null {
+    const canonRepo = this.canonPath(repoCommonDir);
+    if (sessionId) {
+      const s = this.sessions.get(sessionId);
+      if (s && s.repoCommonDir === canonRepo && s.steps.length > 0 && !this.isTourEndedBuffered(s)) {
+        return this.toPublicState(s);
+      }
       return null;
     }
-    return this.toPublicState(session);
+    const states = this.getWalkthroughStates(canonRepo);
+    if (worktreePath) {
+      const canonWt = this.canonPath(worktreePath);
+      return states.find((s) => s.worktreePath === canonWt) ?? null;
+    }
+    return states[0] ?? null;
   }
 
   respondFromUser(repoCommonDir: string, response: WalkthroughUserResponse): void {
-    const canon = existsSync(repoCommonDir) ? realpathSync(repoCommonDir) : repoCommonDir;
-    const session = this.sessions.get(canon);
+    const canonRepo = this.canonPath(repoCommonDir);
+    let session: RepoTourSession | undefined;
+
+    if (response.sessionId) {
+      const candidate = this.sessions.get(response.sessionId);
+      if (candidate && candidate.repoCommonDir === canonRepo) {
+        session = candidate;
+      }
+    }
+    if (!session && response.worktreePath) {
+      const canonWt = this.canonPath(response.worktreePath);
+      session = Array.from(this.sessions.values()).find(
+        (s) => s.repoCommonDir === canonRepo && s.worktreePath === canonWt && !this.isTourEndedBuffered(s),
+      );
+    }
+    if (!session) {
+      session = Array.from(this.sessions.values()).find(
+        (s) =>
+          s.repoCommonDir === canonRepo &&
+          !this.isTourEndedBuffered(s) &&
+          s.steps.some((st) => st.id === response.stepId),
+      );
+    }
+    if (!session) {
+      session = Array.from(this.sessions.values()).find(
+        (s) => s.repoCommonDir === canonRepo && !this.isTourEndedBuffered(s),
+      );
+    }
     if (!session) return;
 
     const targetStep =
@@ -529,6 +649,7 @@ export class TourServer {
     const stepNumber = targetStep?.stepNumber ?? session.steps.length;
 
     const isEnding = response.action === "stop" || response.action === "finish";
+    const hadWaiter = Boolean(session.waiter);
 
     if (session.waiter) {
       const w = session.waiter;
@@ -547,44 +668,100 @@ export class TourServer {
     }
 
     if (isEnding) {
-      this.sessions.delete(canon);
-      this.host.broadcastWalkthrough(canon, null);
+      session.awaitingUser = false;
+      session.agentThinking = false;
+      if (hadWaiter) {
+        this.sessions.delete(session.sessionId);
+      }
+      this.broadcastRepoWalkthroughs(canonRepo);
     } else {
       session.awaitingUser = false;
       session.agentThinking = true;
-      this.host.broadcastWalkthrough(canon, this.toPublicState(session));
+      this.broadcastRepoWalkthroughs(canonRepo);
     }
   }
 
-  endFromUser(repoCommonDir: string): void {
-    const canon = existsSync(repoCommonDir) ? realpathSync(repoCommonDir) : repoCommonDir;
-    const session = this.sessions.get(canon);
-    if (!session) return;
-    this.respondFromUser(canon, {
+  endFromUser(repoCommonDir: string, sessionId?: string): void {
+    const canonRepo = this.canonPath(repoCommonDir);
+    const session = sessionId
+      ? this.sessions.get(sessionId)
+      : Array.from(this.sessions.values()).find(
+          (s) => s.repoCommonDir === canonRepo && !this.isTourEndedBuffered(s),
+        );
+    if (!session || session.repoCommonDir !== canonRepo) return;
+    this.respondFromUser(canonRepo, {
+      sessionId: session.sessionId,
+      worktreePath: session.worktreePath,
       stepId: session.activeStepId,
       action: "stop",
     });
   }
 
-  getReviewState(repoCommonDir: string): ReviewSessionState | null {
-    const canon = existsSync(repoCommonDir) ? realpathSync(repoCommonDir) : repoCommonDir;
-    const session = this.reviewSessions.get(canon);
-    if (!session) return null;
-    if (
-      session.bufferedResponse &&
-      (session.bufferedResponse.action === "approve" || session.bufferedResponse.action === "cancel")
-    ) {
+  getReviewStates(repoCommonDir: string): ReviewSessionState[] {
+    const canonRepo = this.canonPath(repoCommonDir);
+    const out: ReviewSessionState[] = [];
+    for (const session of this.reviewSessions.values()) {
+      if (session.repoCommonDir === canonRepo && !this.isReviewEndedBuffered(session)) {
+        out.push(this.toPublicReviewState(session));
+      }
+    }
+    return out;
+  }
+
+  getReviewState(
+    repoCommonDir: string,
+    worktreePath?: string,
+    sessionId?: string,
+  ): ReviewSessionState | null {
+    const canonRepo = this.canonPath(repoCommonDir);
+    if (sessionId) {
+      const s = this.reviewSessions.get(sessionId);
+      if (s && s.repoCommonDir === canonRepo && !this.isReviewEndedBuffered(s)) {
+        return this.toPublicReviewState(s);
+      }
       return null;
     }
-    return this.toPublicReviewState(session);
+    const states = this.getReviewStates(canonRepo);
+    if (worktreePath) {
+      const canonWt = this.canonPath(worktreePath);
+      const matching = states.filter((s) => s.worktreePath === canonWt);
+      return matching.find((s) => s.awaitingUser) ?? matching[0] ?? null;
+    }
+    return states.find((s) => s.awaitingUser) ?? states[0] ?? null;
   }
 
   respondReviewFromUser(
     repoCommonDir: string,
-    payload: { action: ReviewUserAction; markdown?: string; count: number },
+    payload: {
+      sessionId?: string;
+      worktreePath?: string;
+      action: ReviewUserAction;
+      markdown?: string;
+      count: number;
+    },
   ): boolean {
-    const canon = existsSync(repoCommonDir) ? realpathSync(repoCommonDir) : repoCommonDir;
-    const session = this.reviewSessions.get(canon);
+    const canonRepo = this.canonPath(repoCommonDir);
+    let session: RepoReviewSession | undefined;
+
+    if (payload.sessionId) {
+      const candidate = this.reviewSessions.get(payload.sessionId);
+      if (candidate && candidate.repoCommonDir === canonRepo && !this.isReviewEndedBuffered(candidate)) {
+        session = candidate;
+      }
+    } else if (payload.worktreePath) {
+      const canonWt = this.canonPath(payload.worktreePath);
+      const matching = Array.from(this.reviewSessions.values()).filter(
+        (s) => s.repoCommonDir === canonRepo && s.worktreePath === canonWt && !this.isReviewEndedBuffered(s),
+      );
+      // Strictly scoped to this worktree — never leak feedback to an agent on a different worktree!
+      session = matching.find((s) => s.awaitingUser) ?? matching[0];
+    } else {
+      const active = Array.from(this.reviewSessions.values()).filter(
+        (s) => s.repoCommonDir === canonRepo && !this.isReviewEndedBuffered(s),
+      );
+      session = active.find((s) => s.awaitingUser) ?? active[0];
+    }
+
     if (!session) return false;
 
     const nextRound = payload.action === "feedback" ? session.round + 1 : session.round;
@@ -619,13 +796,13 @@ export class TourServer {
       session.awaitingUser = false;
       session.agentWorking = false;
       if (hadWaiter) {
-        this.reviewSessions.delete(canon);
+        this.reviewSessions.delete(session.sessionId);
       }
-      this.host.broadcastReview?.(canon, null);
+      this.broadcastRepoReviews(canonRepo);
     } else {
       session.awaitingUser = false;
       session.agentWorking = true;
-      this.host.broadcastReview?.(canon, this.toPublicReviewState(session));
+      this.broadcastRepoReviews(canonRepo);
     }
     return true;
   }
@@ -772,13 +949,21 @@ export class TourServer {
           return { id: req.id, ok: true, result };
         }
         case "tour.status": {
-          const cwd = String((req.params ?? {}).cwd ?? process.cwd());
-          const result = await this.handleStatus(cwd);
+          const p = (req.params ?? {}) as { cwd?: string; worktree?: string; sessionId?: string };
+          const result = await this.handleStatus({
+            cwd: String(p.cwd ?? process.cwd()),
+            worktree: p.worktree,
+            sessionId: p.sessionId,
+          });
           return { id: req.id, ok: true, result };
         }
         case "tour.end": {
-          const cwd = String((req.params ?? {}).cwd ?? process.cwd());
-          const result = await this.handleEnd(cwd);
+          const p = (req.params ?? {}) as { cwd?: string; worktree?: string; sessionId?: string };
+          const result = await this.handleEnd({
+            cwd: String(p.cwd ?? process.cwd()),
+            worktree: p.worktree,
+            sessionId: p.sessionId,
+          });
           return { id: req.id, ok: true, result };
         }
         case "review.wait": {
@@ -787,13 +972,21 @@ export class TourServer {
           return { id: req.id, ok: true, result };
         }
         case "review.status": {
-          const cwd = String((req.params ?? {}).cwd ?? process.cwd());
-          const result = await this.handleReviewStatus(cwd);
+          const p = (req.params ?? {}) as { cwd?: string; worktree?: string; sessionId?: string };
+          const result = await this.handleReviewStatus({
+            cwd: String(p.cwd ?? process.cwd()),
+            worktree: p.worktree,
+            sessionId: p.sessionId,
+          });
           return { id: req.id, ok: true, result };
         }
         case "review.end": {
-          const cwd = String((req.params ?? {}).cwd ?? process.cwd());
-          const result = await this.handleReviewEnd(cwd);
+          const p = (req.params ?? {}) as { cwd?: string; worktree?: string; sessionId?: string };
+          const result = await this.handleReviewEnd({
+            cwd: String(p.cwd ?? process.cwd()),
+            worktree: p.worktree,
+            sessionId: p.sessionId,
+          });
           return { id: req.id, ok: true, result };
         }
         default: {
@@ -813,29 +1006,51 @@ export class TourServer {
     }
   }
 
+  private findTourSession(
+    repoCommonDir: string,
+    worktreePath: string,
+    sessionId?: string,
+  ): RepoTourSession | undefined {
+    const canonRepo = this.canonPath(repoCommonDir);
+    if (sessionId) {
+      const exact = this.sessions.get(sessionId);
+      return exact && exact.repoCommonDir === canonRepo ? exact : undefined;
+    }
+    const canonWt = this.canonPath(worktreePath);
+    const matches = Array.from(this.sessions.values()).filter(
+      (s) => s.repoCommonDir === canonRepo && s.worktreePath === canonWt,
+    );
+    return matches[matches.length - 1];
+  }
+
   private async handleStart(params: TourStartParams): Promise<{ sessionId: string }> {
     const repoInfo = await this.host.ensureRepoWindow({
       cwd: params.cwd,
       worktree: params.worktree,
       focusWindow: true,
     });
-    const existing = this.sessions.get(repoInfo.repoCommonDir);
-    if (existing?.waiter) {
-      if (existing.waiter.timer) clearTimeout(existing.waiter.timer);
-      existing.waiter.resolve({
-        status: "responded",
-        sessionId: existing.sessionId,
-        stepId: existing.waiter.stepId,
-        stepNumber: existing.waiter.stepNumber,
-        action: "stop",
-      });
+    const canonRepo = this.canonPath(repoInfo.repoCommonDir);
+    const canonWt = this.canonPath(repoInfo.worktreePath);
+    const existing = this.findTourSession(canonRepo, canonWt, params.sessionId);
+    if (existing) {
+      if (existing.waiter) {
+        if (existing.waiter.timer) clearTimeout(existing.waiter.timer);
+        existing.waiter.resolve({
+          status: "responded",
+          sessionId: existing.sessionId,
+          stepId: existing.waiter.stepId,
+          stepNumber: existing.waiter.stepNumber,
+          action: "stop",
+        });
+      }
+      this.sessions.delete(existing.sessionId);
     }
 
-    const sessionId = randomBytes(8).toString("hex");
+    const sessionId = params.sessionId?.trim() || randomBytes(8).toString("hex");
     const fresh: RepoTourSession = {
       sessionId,
-      repoCommonDir: repoInfo.repoCommonDir,
-      worktreePath: repoInfo.worktreePath,
+      repoCommonDir: canonRepo,
+      worktreePath: canonWt,
       title: params.title,
       totalSteps: params.totalSteps,
       steps: [],
@@ -845,8 +1060,8 @@ export class TourServer {
       waiter: null,
       bufferedResponse: null,
     };
-    this.sessions.set(repoInfo.repoCommonDir, fresh);
-    this.host.broadcastWalkthrough(repoInfo.repoCommonDir, null);
+    this.sessions.set(sessionId, fresh);
+    this.broadcastRepoWalkthroughs(canonRepo);
     return { sessionId };
   }
 
@@ -855,20 +1070,29 @@ export class TourServer {
       throw new Error("`ide2 tour step` requires --title and/or a Markdown explanation body.");
     }
 
-    const existingBeforeOpen = Array.from(this.sessions.values());
+    const canonCwd = this.canonPath(params.cwd);
+    const hasExistingForCwd = Array.from(this.sessions.values()).some(
+      (s) => canonCwd === s.worktreePath || canonCwd.startsWith(`${s.worktreePath}${sep}`),
+    );
     const repoInfo = await this.host.ensureRepoWindow({
       cwd: params.cwd,
       worktree: params.worktree,
-      // Focus the ide2 window on the very first step of a tour so the user sees it open
-      focusWindow: existingBeforeOpen.length === 0,
+      focusWindow: !hasExistingForCwd,
     });
+    const canonRepo = this.canonPath(repoInfo.repoCommonDir);
+    const canonWt = this.canonPath(repoInfo.worktreePath);
 
-    let session = this.sessions.get(repoInfo.repoCommonDir);
+    let session = this.findTourSession(canonRepo, canonWt, params.sessionId);
+    if (session && this.isTourEndedBuffered(session)) {
+      this.sessions.delete(session.sessionId);
+      session = undefined;
+    }
     if (!session) {
+      const sessionId = params.sessionId?.trim() || randomBytes(8).toString("hex");
       session = {
-        sessionId: randomBytes(8).toString("hex"),
-        repoCommonDir: repoInfo.repoCommonDir,
-        worktreePath: repoInfo.worktreePath,
+        sessionId,
+        repoCommonDir: canonRepo,
+        worktreePath: canonWt,
         totalSteps: params.totalSteps,
         steps: [],
         activeStepId: "",
@@ -877,7 +1101,7 @@ export class TourServer {
         waiter: null,
         bufferedResponse: null,
       };
-      this.sessions.set(repoInfo.repoCommonDir, session);
+      this.sessions.set(sessionId, session);
     }
 
     // Cancel any previous superseded waiter on this session
@@ -894,7 +1118,7 @@ export class TourServer {
       });
     }
 
-    const resolvedTarget = resolveValidatedTarget(repoInfo.worktreePath, params);
+    const resolvedTarget = resolveValidatedTarget(canonWt, params);
     const stepNumber = params.stepNumber ?? session.steps.length + 1;
     const totalSteps = params.totalSteps ?? session.totalSteps;
     if (totalSteps !== undefined) {
@@ -905,7 +1129,7 @@ export class TourServer {
     const step: WalkthroughStep = {
       id: stepId,
       sessionId: session.sessionId,
-      worktreePath: repoInfo.worktreePath,
+      worktreePath: canonWt,
       stepNumber,
       totalSteps,
       title: params.title?.trim() || resolvedTarget.targetPath || `Step ${stepNumber}`,
@@ -921,7 +1145,7 @@ export class TourServer {
       createdAt: Date.now(),
     };
 
-    session.worktreePath = repoInfo.worktreePath;
+    session.worktreePath = canonWt;
     session.steps.push(step);
     session.activeStepId = step.id;
     session.bufferedResponse = null;
@@ -930,7 +1154,7 @@ export class TourServer {
     session.awaitingUser = shouldWait;
     session.agentThinking = false;
 
-    this.host.broadcastWalkthrough(repoInfo.repoCommonDir, this.toPublicState(session));
+    this.broadcastRepoWalkthroughs(canonRepo);
 
     if (!shouldWait) {
       return {
@@ -947,9 +1171,12 @@ export class TourServer {
   private async handleWait(params: TourWaitParams, conn?: Socket): Promise<TourStepRpcResult> {
     const repoInfo = await this.host.ensureRepoWindow({
       cwd: params.cwd,
+      worktree: params.worktree,
       focusWindow: false,
     });
-    const session = this.sessions.get(repoInfo.repoCommonDir);
+    const canonRepo = this.canonPath(repoInfo.repoCommonDir);
+    const canonWt = this.canonPath(repoInfo.worktreePath);
+    const session = this.findTourSession(canonRepo, canonWt, params.sessionId);
     if (!session || session.steps.length === 0) {
       return { status: "idle", sessionId: "" };
     }
@@ -961,6 +1188,10 @@ export class TourServer {
     if (session.bufferedResponse) {
       const buffered = session.bufferedResponse;
       session.bufferedResponse = null;
+      if (buffered.action === "finish" || buffered.action === "stop") {
+        this.sessions.delete(session.sessionId);
+        this.broadcastRepoWalkthroughs(canonRepo);
+      }
       return {
         status: "responded",
         sessionId: session.sessionId,
@@ -1032,9 +1263,14 @@ export class TourServer {
     });
   }
 
-  private async handleStatus(cwd: string): Promise<{
+  private async handleStatus(params: {
+    cwd: string;
+    worktree?: string;
+    sessionId?: string;
+  }): Promise<{
     active: boolean;
     sessionId?: string;
+    worktreePath?: string;
     title?: string;
     stepCount: number;
     activeStepNumber?: number;
@@ -1042,11 +1278,14 @@ export class TourServer {
     agentThinking: boolean;
   }> {
     const repoInfo = await this.host.ensureRepoWindow({
-      cwd,
+      cwd: params.cwd,
+      worktree: params.worktree,
       focusWindow: false,
     });
-    const session = this.sessions.get(repoInfo.repoCommonDir);
-    if (!session || session.steps.length === 0) {
+    const canonRepo = this.canonPath(repoInfo.repoCommonDir);
+    const canonWt = this.canonPath(repoInfo.worktreePath);
+    const session = this.findTourSession(canonRepo, canonWt, params.sessionId);
+    if (!session || session.steps.length === 0 || this.isTourEndedBuffered(session)) {
       return {
         active: false,
         stepCount: 0,
@@ -1054,10 +1293,13 @@ export class TourServer {
         agentThinking: false,
       };
     }
-    const activeStep = session.steps.find((s) => s.id === session.activeStepId);
+    const activeStep =
+      session.steps.find((s) => s.id === session.activeStepId) ??
+      session.steps[session.steps.length - 1];
     return {
       active: true,
       sessionId: session.sessionId,
+      worktreePath: session.worktreePath,
       title: session.title,
       stepCount: session.steps.length,
       activeStepNumber: activeStep?.stepNumber,
@@ -1066,12 +1308,19 @@ export class TourServer {
     };
   }
 
-  private async handleEnd(cwd: string): Promise<{ ended: boolean }> {
+  private async handleEnd(params: {
+    cwd: string;
+    worktree?: string;
+    sessionId?: string;
+  }): Promise<{ ended: boolean }> {
     const repoInfo = await this.host.ensureRepoWindow({
-      cwd,
+      cwd: params.cwd,
+      worktree: params.worktree,
       focusWindow: false,
     });
-    const session = this.sessions.get(repoInfo.repoCommonDir);
+    const canonRepo = this.canonPath(repoInfo.repoCommonDir);
+    const canonWt = this.canonPath(repoInfo.worktreePath);
+    const session = this.findTourSession(canonRepo, canonWt, params.sessionId);
     if (!session) {
       return { ended: false };
     }
@@ -1087,8 +1336,8 @@ export class TourServer {
         action: "finish",
       });
     }
-    this.sessions.delete(repoInfo.repoCommonDir);
-    this.host.broadcastWalkthrough(repoInfo.repoCommonDir, null);
+    this.sessions.delete(session.sessionId);
+    this.broadcastRepoWalkthroughs(canonRepo);
     return { ended: true };
   }
 
@@ -1096,20 +1345,45 @@ export class TourServer {
     params: ReviewWaitParams,
     conn?: Socket,
   ): Promise<ReviewWaitRpcResult> {
-    const existingAny = this.reviewSessions.size > 0;
+    const canonCwd = this.canonPath(params.cwd);
+    const hasReviewForCwd = Array.from(this.reviewSessions.values()).some(
+      (s) => canonCwd === s.worktreePath || canonCwd.startsWith(`${s.worktreePath}${sep}`),
+    );
     const repoInfo = await this.host.ensureRepoWindow({
       cwd: params.cwd,
       worktree: params.worktree,
       diff: params.diff,
-      focusWindow: !existingAny,
+      focusWindow: !hasReviewForCwd,
     });
+    const canonRepo = this.canonPath(repoInfo.repoCommonDir);
+    const canonWt = this.canonPath(repoInfo.worktreePath);
 
-    let session = this.reviewSessions.get(repoInfo.repoCommonDir);
+    let session: RepoReviewSession | undefined;
+    if (params.sessionId) {
+      const exact = this.reviewSessions.get(params.sessionId);
+      if (exact && exact.repoCommonDir === canonRepo) {
+        session = exact;
+      }
+    } else {
+      const wtSessions = Array.from(this.reviewSessions.values()).filter(
+        (s) => s.repoCommonDir === canonRepo && s.worktreePath === canonWt,
+      );
+      // 1. Prefer any session with a buffered click (e.g. Approve/Send right between wait-timeout & resume)
+      session = wtSessions.find((s) => s.bufferedResponse !== null);
+      // 2. Otherwise reuse a session that is not currently blocked on another live waiter (same agent looping Round 2+)
+      if (!session) {
+        session = wtSessions.find((s) => s.waiter === null);
+      }
+      // 3. If ALL existing sessions on this worktree currently have an active waiter, a second simultaneous
+      //    agent just connected to the same worktree -> allocate a new distinct session instead of evicting Agent 1!
+    }
+
     if (!session) {
+      const sessionId = params.sessionId?.trim() || randomBytes(8).toString("hex");
       session = {
-        sessionId: randomBytes(8).toString("hex"),
-        repoCommonDir: repoInfo.repoCommonDir,
-        worktreePath: repoInfo.worktreePath,
+        sessionId,
+        repoCommonDir: canonRepo,
+        worktreePath: canonWt,
         label: params.label,
         awaitingUser: true,
         agentWorking: false,
@@ -1119,14 +1393,14 @@ export class TourServer {
         waiter: null,
         bufferedResponse: null,
       };
-      this.reviewSessions.set(repoInfo.repoCommonDir, session);
+      this.reviewSessions.set(sessionId, session);
     } else {
       if (session.bufferedResponse) {
         const buffered = session.bufferedResponse;
         session.bufferedResponse = null;
         if (buffered.action === "approve" || buffered.action === "cancel") {
-          this.reviewSessions.delete(repoInfo.repoCommonDir);
-          this.host.broadcastReview?.(repoInfo.repoCommonDir, null);
+          this.reviewSessions.delete(session.sessionId);
+          this.broadcastRepoReviews(canonRepo);
         }
         return {
           status: "responded",
@@ -1149,7 +1423,7 @@ export class TourServer {
         });
       }
 
-      session.worktreePath = repoInfo.worktreePath;
+      session.worktreePath = canonWt;
       if (params.label !== undefined) session.label = params.label;
       if (params.resolveOnSend !== undefined) session.resolveOnSend = params.resolveOnSend;
       session.awaitingUser = true;
@@ -1157,9 +1431,10 @@ export class TourServer {
       session.updatedAt = Date.now();
     }
 
-    this.host.broadcastReview?.(repoInfo.repoCommonDir, this.toPublicReviewState(session));
+    this.broadcastRepoReviews(canonRepo);
 
     const timeoutMs = params.waitTimeoutMs ?? 90_000;
+    const activeSession = session;
     return new Promise<ReviewWaitRpcResult>((resolveWait) => {
       const waiter: PendingReviewWaiter = {
         resolve: resolveWait,
@@ -1167,82 +1442,115 @@ export class TourServer {
 
       if (timeoutMs > 0) {
         waiter.timer = setTimeout(() => {
-          if (session.waiter === waiter) {
-            session.waiter = null;
+          if (activeSession.waiter === waiter) {
+            activeSession.waiter = null;
           }
           resolveWait({
             status: "waiting",
-            sessionId: session.sessionId,
-            round: session.round,
+            sessionId: activeSession.sessionId,
+            round: activeSession.round,
           });
         }, timeoutMs);
       }
 
       if (conn) {
         conn.once("close", () => {
-          if (session.waiter === waiter) {
+          if (activeSession.waiter === waiter) {
             if (waiter.timer) clearTimeout(waiter.timer);
-            session.waiter = null;
+            activeSession.waiter = null;
           }
         });
       }
 
-      session.waiter = waiter;
+      activeSession.waiter = waiter;
     });
   }
 
-  private async handleReviewStatus(cwd: string): Promise<{
+  private async handleReviewStatus(params: {
+    cwd: string;
+    worktree?: string;
+    sessionId?: string;
+  }): Promise<{
     active: boolean;
     sessionId?: string;
     worktreePath?: string;
     awaitingUser: boolean;
     agentWorking: boolean;
     round: number;
+    sessions: ReviewSessionState[];
   }> {
     const repoInfo = await this.host.ensureRepoWindow({
-      cwd,
+      cwd: params.cwd,
+      worktree: params.worktree,
       focusWindow: false,
     });
-    const session = this.reviewSessions.get(repoInfo.repoCommonDir);
-    if (
-      !session ||
-      (session.bufferedResponse &&
-        (session.bufferedResponse.action === "approve" || session.bufferedResponse.action === "cancel"))
-    ) {
-      return { active: false, awaitingUser: false, agentWorking: false, round: 0 };
+    const canonRepo = this.canonPath(repoInfo.repoCommonDir);
+    const canonWt = this.canonPath(repoInfo.worktreePath);
+    const allRepoSessions = this.getReviewStates(canonRepo);
+    const matching = params.sessionId
+      ? allRepoSessions.filter((s) => s.sessionId === params.sessionId)
+      : allRepoSessions.filter((s) => s.worktreePath === canonWt);
+    const primary = matching.find((s) => s.awaitingUser) ?? matching[0];
+    if (!primary) {
+      return {
+        active: false,
+        awaitingUser: false,
+        agentWorking: false,
+        round: 0,
+        sessions: allRepoSessions,
+      };
     }
     return {
       active: true,
-      sessionId: session.sessionId,
-      worktreePath: session.worktreePath,
-      awaitingUser: session.awaitingUser,
-      agentWorking: session.agentWorking,
-      round: session.round,
+      sessionId: primary.sessionId,
+      worktreePath: primary.worktreePath,
+      awaitingUser: primary.awaitingUser,
+      agentWorking: primary.agentWorking,
+      round: primary.round,
+      sessions: matching,
     };
   }
 
-  private async handleReviewEnd(cwd: string): Promise<{ ended: boolean }> {
+  private async handleReviewEnd(params: {
+    cwd: string;
+    worktree?: string;
+    sessionId?: string;
+  }): Promise<{ ended: boolean }> {
     const repoInfo = await this.host.ensureRepoWindow({
-      cwd,
+      cwd: params.cwd,
+      worktree: params.worktree,
       focusWindow: false,
     });
-    const session = this.reviewSessions.get(repoInfo.repoCommonDir);
-    if (!session) {
+    const canonRepo = this.canonPath(repoInfo.repoCommonDir);
+    const canonWt = this.canonPath(repoInfo.worktreePath);
+
+    const targets = params.sessionId
+      ? (() => {
+          const exact = this.reviewSessions.get(params.sessionId!);
+          return exact && exact.repoCommonDir === canonRepo ? [exact] : [];
+        })()
+      : Array.from(this.reviewSessions.values()).filter(
+          (s) => s.repoCommonDir === canonRepo && s.worktreePath === canonWt,
+        );
+
+    if (targets.length === 0) {
       return { ended: false };
     }
-    if (session.waiter) {
-      const w = session.waiter;
-      session.waiter = null;
-      if (w.timer) clearTimeout(w.timer);
-      w.resolve({
-        status: "responded",
-        sessionId: session.sessionId,
-        round: session.round,
-        action: "cancel",
-      });
+    for (const session of targets) {
+      if (session.waiter) {
+        const w = session.waiter;
+        session.waiter = null;
+        if (w.timer) clearTimeout(w.timer);
+        w.resolve({
+          status: "responded",
+          sessionId: session.sessionId,
+          round: session.round,
+          action: "cancel",
+        });
+      }
+      this.reviewSessions.delete(session.sessionId);
     }
-    this.reviewSessions.delete(repoInfo.repoCommonDir);
-    this.host.broadcastReview?.(repoInfo.repoCommonDir, null);
+    this.broadcastRepoReviews(canonRepo);
     return { ended: true };
   }
 }

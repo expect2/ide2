@@ -150,17 +150,22 @@ const tourServer = new TourServer({
       diff: Boolean(diff),
       worktree,
     };
-    const opened = await openIdeWindow(flags, undefined, {
-      focusOnReuse: focusWindow,
-      suppressCliOpenEvent: !diff,
-    });
     const { session, launchContext } = await getOrCreateRepoSession(flags);
+    // Avoid hijacking worktree/window focus if another worktree in the same repo is already mid-review
+    const otherWtAwaiting = tourServer
+      .getReviewStates(session.context.repoCommonDir)
+      .some((r) => r.awaitingUser && r.worktreePath !== launchContext.initialWorktreePath);
+    const shouldFocus = focusWindow && !otherWtAwaiting;
+    const opened = await openIdeWindow(flags, undefined, {
+      focusOnReuse: shouldFocus,
+      suppressCliOpenEvent: !diff || otherWtAwaiting,
+    });
     const cachedWts = session.git.listCachedWorktrees();
     const worktrees =
       cachedWts.length > 0
         ? cachedWts
         : await session.git.discoverWorktrees(launchContext.initialWorktreePath);
-    if (focusWindow && !opened.win.isDestroyed()) {
+    if (shouldFocus && !opened.win.isDestroyed()) {
       opened.win.show();
       opened.win.focus();
     }
@@ -171,21 +176,21 @@ const tourServer = new TourServer({
       worktrees,
     };
   },
-  broadcastWalkthrough: (repoCommonDir, state) => {
+  broadcastWalkthrough: (repoCommonDir, walkthroughs) => {
     const session = sessionsByCommonDir.get(repoCommonDir);
     if (session) {
       broadcastToSession(session, {
         type: "walkthrough-updated",
-        walkthrough: state,
+        walkthroughs,
       });
     }
   },
-  broadcastReview: (repoCommonDir, state) => {
+  broadcastReview: (repoCommonDir, reviews) => {
     const session = sessionsByCommonDir.get(repoCommonDir);
     if (session) {
       broadcastToSession(session, {
         type: "review-updated",
-        review: state,
+        reviews,
       });
     }
   },
@@ -637,6 +642,7 @@ async function openIdeWindow(
     if (session.windows.size === 0) {
       session.watcher.close();
       sessionsByCommonDir.delete(session.context.repoCommonDir);
+      tourServer.closeRepo(session.context.repoCommonDir);
     }
   });
 
@@ -671,8 +677,8 @@ function registerIpcHandlers(): void {
       context: launchContext,
       worktrees,
       annotations,
-      walkthrough: tourServer.getState(session.context.repoCommonDir),
-      review: tourServer.getReviewState(session.context.repoCommonDir),
+      walkthroughs: tourServer.getWalkthroughStates(session.context.repoCommonDir),
+      reviews: tourServer.getReviewStates(session.context.repoCommonDir),
     };
   });
 
@@ -956,9 +962,9 @@ function registerIpcHandlers(): void {
     tourServer.respondFromUser(session.context.repoCommonDir, response);
   });
 
-  ipcMain.handle("ide2:endWalkthrough", (evt) => {
+  ipcMain.handle("ide2:endWalkthrough", (evt, sessionId?: string) => {
     const { session } = getWindowSession(evt.sender);
-    tourServer.endFromUser(session.context.repoCommonDir);
+    tourServer.endFromUser(session.context.repoCommonDir, sessionId);
   });
 
   ipcMain.handle("ide2:getWalkthroughAgentPrompt", (evt) => {
@@ -973,23 +979,33 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("ide2:sendReviewResponse", async (evt, response: ReviewUserResponse) => {
     const { session } = getWindowSession(evt.sender);
+    const safeWt = assertRegisteredWorktree(session, response.worktreePath);
+
     if (response.action === "approve" || response.action === "cancel") {
       const sent = tourServer.respondReviewFromUser(session.context.repoCommonDir, {
+        sessionId: response.sessionId,
+        worktreePath: safeWt,
         action: response.action,
         count: 0,
       });
       return { sent, count: 0 };
     }
 
-    const safeWt = assertRegisteredWorktree(session, response.worktreePath);
     const wts = await session.git.discoverWorktrees(session.context.initialWorktreePath);
     const wt = wts.find((w) => w.path === safeWt) ?? wts[0];
     if (!wt) {
       return { sent: false, count: 0 };
     }
 
-    const reviewState = tourServer.getReviewState(session.context.repoCommonDir);
-    const shouldResolve = response.resolveAfterSend ?? reviewState?.resolveOnSend ?? true;
+    const reviewState = tourServer.getReviewState(
+      session.context.repoCommonDir,
+      safeWt,
+      response.sessionId,
+    );
+    if (!reviewState) {
+      return { sent: false, count: 0 };
+    }
+    const shouldResolve = response.resolveAfterSend ?? reviewState.resolveOnSend ?? true;
 
     const compiled = await session.annotations.compilePrompt(wt, {
       worktreePath: safeWt,
@@ -1010,6 +1026,8 @@ function registerIpcHandlers(): void {
     }
 
     const sent = tourServer.respondReviewFromUser(session.context.repoCommonDir, {
+      sessionId: response.sessionId ?? reviewState.sessionId,
+      worktreePath: safeWt,
       action: "feedback",
       markdown: compiled.markdown,
       count: compiled.count,

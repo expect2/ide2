@@ -46,7 +46,7 @@ const bridge: Ide2Bridge = {
   listRecentProjects: () => ipcRenderer.invoke("ide2:listRecentProjects"),
   respondWalkthrough: (response: WalkthroughUserResponse) =>
     ipcRenderer.invoke("ide2:respondWalkthrough", response),
-  endWalkthrough: () => ipcRenderer.invoke("ide2:endWalkthrough"),
+  endWalkthrough: (sessionId?: string) => ipcRenderer.invoke("ide2:endWalkthrough", sessionId),
   getWalkthroughAgentPrompt: () => ipcRenderer.invoke("ide2:getWalkthroughAgentPrompt"),
   sendReviewResponse: (response: ReviewUserResponse) =>
     ipcRenderer.invoke("ide2:sendReviewResponse", response),
