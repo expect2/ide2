@@ -510,7 +510,7 @@ select:focus-visible {
   margin: 6px 16px 8px 64px;
   background: var(--wash);
   border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--unknown);
+  border-left: 3px solid var(--sky);
   border-radius: var(--radius-md);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
   font-family: var(--ui-font);
@@ -519,17 +519,8 @@ select:focus-visible {
   overflow: hidden;
 }
 
-.ann-card.ann-intent-bug {
-  border-left-color: var(--unsafe);
-}
-
-.ann-card.ann-intent-keep {
-  border-left-color: var(--safe);
-}
-
-.ann-card.ann-intent-change,
-.ann-card.ann-intent-question {
-  border-left-color: var(--unknown);
+.ann-card.ann-resolved-card {
+  border-left-color: var(--off);
 }
 
 .ann-card.ann-compact {
@@ -577,47 +568,6 @@ select:focus-visible {
   border: 1px solid rgba(255, 93, 77, 0.4);
   color: var(--unsafe);
   background: var(--unsafe-bg);
-}
-
-.ann-intent-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ann-intent-pill {
-  padding: 3px 9px;
-  font-size: 11.5px;
-  font-weight: 600;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--paper);
-  color: var(--dim);
-  cursor: pointer;
-}
-
-.ann-intent-pill:hover {
-  border-color: var(--dim);
-  color: var(--ink);
-}
-
-.ann-intent-pill.active.intent-change,
-.ann-intent-pill.active.intent-question {
-  background: var(--unknown-bg-hi);
-  color: var(--unknown);
-  border-color: var(--unknown);
-}
-
-.ann-intent-pill.active.intent-bug {
-  background: var(--unsafe-bg-hi);
-  color: var(--unsafe);
-  border-color: var(--unsafe);
-}
-
-.ann-intent-pill.active.intent-keep {
-  background: var(--safe-bg-hi);
-  color: var(--safe);
-  border-color: var(--safe);
 }
 
 .ann-snippet-preview {
@@ -703,34 +653,6 @@ select:focus-visible {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-}
-
-.ann-intent-badge {
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  font-family: var(--mono);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-}
-
-.ann-intent-badge.intent-bug {
-  background: var(--unsafe-bg);
-  border: 1px solid rgba(255, 93, 77, 0.45);
-  color: var(--unsafe);
-}
-
-.ann-intent-badge.intent-change,
-.ann-intent-badge.intent-question {
-  background: var(--unknown-bg);
-  border: 1px solid rgba(255, 228, 92, 0.45);
-  color: var(--unknown);
-}
-
-.ann-intent-badge.intent-keep {
-  background: var(--safe-bg);
-  border: 1px solid rgba(109, 255, 166, 0.45);
-  color: var(--safe);
 }
 
 .ann-range-badge {
@@ -1081,12 +1003,9 @@ select:focus-visible {
   padding: 0;
   border: none;
   background: transparent;
+  color: var(--sky);
 }
 
-.code-ann-diamond.intent-bug { color: var(--unsafe); }
-.code-ann-diamond.intent-change,
-.code-ann-diamond.intent-question { color: var(--unknown); }
-.code-ann-diamond.intent-keep { color: var(--safe); }
 .code-ann-diamond.resolved { color: var(--off); }
 
 .code-ann-add {

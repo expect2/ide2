@@ -8,7 +8,6 @@ import React, {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   Annotation,
-  AnnotationIntent,
   DiffRow,
   DiffScope,
   FileDiffResult,
@@ -33,12 +32,11 @@ export interface DiffViewportProps {
     selectedText: string;
     contextBefore: string;
     contextAfter: string;
-    intent: AnnotationIntent;
     comment: string;
   }) => void | Promise<void>;
   onUpdateAnnotation?: (
     annotation: Annotation,
-    updates: { intent: AnnotationIntent; comment: string },
+    updates: { comment: string },
   ) => void | Promise<void>;
   onResolveAnnotation?: (annotation: Annotation) => void | Promise<void>;
   onUnresolveAnnotation?: (annotation: Annotation) => void | Promise<void>;
@@ -388,7 +386,6 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
   };
 
   const handleSubmitComposer = async (data: {
-    intent: AnnotationIntent;
     comment: string;
   }) => {
     if (!composer || !onCreateAnnotation) return;
@@ -405,7 +402,6 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
       selectedText: ctx.selectedText,
       contextBefore: ctx.contextBefore,
       contextAfter: ctx.contextAfter,
-      intent: data.intent,
       comment: data.comment,
     });
     setComposer(null);
@@ -692,7 +688,9 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                                 {oldLead ? (
                                   <button
                                     type="button"
-                                    className={`code-ann-diamond intent-${oldLead.intent}`}
+                                    className={`code-ann-diamond ${
+                                      oldLead.status === "resolved" ? "resolved" : ""
+                                    }`}
                                     onClick={() =>
                                       openComposer(
                                         "old",
@@ -765,7 +763,9 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                                 {newLead ? (
                                   <button
                                     type="button"
-                                    className={`code-ann-diamond intent-${newLead.intent}`}
+                                    className={`code-ann-diamond ${
+                                      newLead.status === "resolved" ? "resolved" : ""
+                                    }`}
                                     onClick={() =>
                                       openComposer(
                                         "new",
@@ -956,7 +956,9 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                         {leadAnn ? (
                           <button
                             type="button"
-                            className={`code-ann-diamond intent-${leadAnn.intent}`}
+                            className={`code-ann-diamond ${
+                              leadAnn.status === "resolved" ? "resolved" : ""
+                            }`}
                             onClick={() =>
                               targetLine !== undefined &&
                               openComposer(

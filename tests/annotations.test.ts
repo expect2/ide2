@@ -36,7 +36,6 @@ describe("AnnotationStore", () => {
       filePath: "src\\auth.ts",
       startLine: 2,
       endLine: 3,
-      intent: "bug",
       comment: "Missing null check before reading token",
       selectedText: "const token = req.headers.authorization;\nreturn token.split(' ')[1];",
       contextBefore: "export function parseAuth(req: Req) {",
@@ -52,10 +51,8 @@ describe("AnnotationStore", () => {
     const updated = await store.update({
       id: created.id,
       comment: "Validate authorization header presence",
-      intent: "change",
     });
     expect(updated.comment).toBe("Validate authorization header presence");
-    expect(updated.intent).toBe("change");
 
     // Reload from a fresh AnnotationStore instance
     const reloadedStore = new AnnotationStore(repoCommonDir, storageRoot);
@@ -92,7 +89,6 @@ describe("AnnotationStore", () => {
       filePath: "src/calc.ts",
       startLine: 5,
       endLine: 6,
-      intent: "change",
       comment: "Extract helper",
       selectedText: "  const target = compute();\n  return target;",
       contextBefore: "function b() {",
@@ -106,7 +102,6 @@ describe("AnnotationStore", () => {
       side: "old",
       startLine: 2,
       endLine: 2,
-      intent: "question",
       comment: "Why was this removed?",
       selectedText: "  return 1;",
       contentHash: "h1",
@@ -173,7 +168,6 @@ describe("AnnotationStore", () => {
 
     const note = await store.create({
       worktreePath: wtPath,
-      intent: "keep",
       comment: "Overall structure looks great.",
     });
 
@@ -182,7 +176,6 @@ describe("AnnotationStore", () => {
       filePath: "src/server.ts",
       startLine: 12,
       endLine: 12,
-      intent: "bug",
       comment: "Handle timeout errors",
       selectedText: "await fetch(url);",
       contentHash: "h1",
@@ -195,9 +188,10 @@ describe("AnnotationStore", () => {
 
     expect(compiled.count).toBe(2);
     expect(compiled.markdown).toContain("# Code Review Feedback — `wt-api`");
-    expect(compiled.markdown).toContain("**[KEEP]** Overall structure looks great.");
-    expect(compiled.markdown).toContain("`[BUG]` `src/server.ts:12`");
+    expect(compiled.markdown).toContain("## Overall Notes\n\nOverall structure looks great.");
+    expect(compiled.markdown).toContain("## 1. `src/server.ts:12`");
     expect(compiled.markdown).toContain("Handle timeout errors");
+    expect(compiled.markdown).not.toMatch(/\[(BUG|CHANGE|QUESTION|KEEP)\]/);
 
     const remaining = await store.list(wtPath);
     expect(remaining.find((a) => a.id === note.id)?.status).toBe("resolved");

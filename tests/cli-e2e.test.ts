@@ -255,18 +255,16 @@ async function seedAnnotations(
   // 1. Overall worktree note on wt-agent-a
   const overall = await store.create({
     worktreePath: fixture.wtAgentADir,
-    intent: "change",
     comment: "Ensure all auth middleware paths enforce strict Bearer token validation.",
   });
 
-  // 2. [BUG] multi-line code annotation on wt-agent-a (lines 6-8 BEFORE 10-line shift)
+  // 2. Multi-line code annotation on wt-agent-a (lines 6-8 BEFORE 10-line shift)
   const bugCode = await store.create({
     worktreePath: fixture.wtAgentADir,
     filePath: "src/auth.ts",
     side: "new",
     startLine: 6,
     endLine: 8,
-    intent: "bug",
     comment: "Guard against undefined `token` before calling `token.slice(0, 12)`.",
     selectedText: [
       "  const [scheme, token] = trimmed.split(' ');",
@@ -279,28 +277,26 @@ async function seedAnnotations(
     language: "typescript",
   });
 
-  // 3. [QUESTION] deleted-line diff annotation (side: "old") on wt-agent-a
+  // 3. Deleted-line diff annotation (side: "old") on wt-agent-a
   const deletedDiff = await store.create({
     worktreePath: fixture.wtAgentADir,
     filePath: "src/auth.ts",
     side: "old",
     startLine: 3,
     endLine: 3,
-    intent: "question",
     comment: "Was removing the legacy anonymous guest fallback coordinated with mobile clients?",
     selectedText: "  if (!header) return { userId: 'legacy-anon', role: 'guest' };",
     contentHash: authHash,
     language: "typescript",
   });
 
-  // 4. [KEEP] Markdown spec annotation on wt-agent-a (lines 5-6)
+  // 4. Markdown spec annotation on wt-agent-a (lines 5-6)
   const keepSpec = await store.create({
     worktreePath: fixture.wtAgentADir,
     filePath: "docs/spec.md",
     side: "new",
     startLine: 5,
     endLine: 6,
-    intent: "keep",
     comment: "Keep this zero-mutation guarantee verbatim in the final specification.",
     selectedText: [
       "- All endpoints must reject missing or malformed Bearer tokens.",
@@ -315,7 +311,6 @@ async function seedAnnotations(
   // Separate annotations on sibling worktree wt-agent-b (must NEVER leak into wt-agent-a)
   const wtBOverall = await store.create({
     worktreePath: fixture.wtAgentBDir,
-    intent: "change",
     comment: "WT_AGENT_B_OVERALL_SECRET: Enforce idempotency keys across billing endpoints.",
   });
 
@@ -325,7 +320,6 @@ async function seedAnnotations(
     side: "new",
     startLine: 1,
     endLine: 3,
-    intent: "bug",
     comment: "WT_AGENT_B_BILLING_BUG: Reject negative or NaN invoice amounts explicitly.",
     selectedText: [
       "export function chargeInvoice(invoiceId: string, cents: number): boolean {",
@@ -363,8 +357,8 @@ function assertExpectedWtAPrompt(markdown: string, fixture: MultiWorktreeFixture
     "Ensure all auth middleware paths enforce strict Bearer token validation.",
   );
 
-  // 2. [KEEP] Markdown spec annotation (lines 5-6, unchanged)
-  expect(markdown).toContain("## 1. `[KEEP]` `docs/spec.md:5-6`");
+  // 2. Markdown spec annotation (lines 5-6, unchanged)
+  expect(markdown).toContain("## 1. `docs/spec.md:5-6`");
   expect(markdown).toContain("5 | - All endpoints must reject missing or malformed Bearer tokens.");
   expect(markdown).toContain(
     "6 | - Read-only review tooling must never mutate worktree files or acquire git locks.",
@@ -373,16 +367,16 @@ function assertExpectedWtAPrompt(markdown: string, fixture: MultiWorktreeFixture
     "Keep this zero-mutation guarantee verbatim in the final specification.",
   );
 
-  // 3. [QUESTION] deleted-line diff annotation (side: "old", line 3 preserved)
-  expect(markdown).toContain("## 2. `[QUESTION]` `src/auth.ts:3` *(deleted in diff)*");
+  // 3. Deleted-line diff annotation (side: "old", line 3 preserved)
+  expect(markdown).toContain("## 2. `src/auth.ts:3` *(deleted in diff)*");
   expect(markdown).toContain("```diff");
   expect(markdown).toContain("-   if (!header) return { userId: 'legacy-anon', role: 'guest' };");
   expect(markdown).toContain(
     "Was removing the legacy anonymous guest fallback coordinated with mobile clients?",
   );
 
-  // 4. [BUG] multi-line code annotation shifted by +10 (from 6-8 to 16-18!)
-  expect(markdown).toContain("## 3. `[BUG]` `src/auth.ts:16-18`");
+  // 4. Multi-line code annotation shifted by +10 (from 6-8 to 16-18!)
+  expect(markdown).toContain("## 3. `src/auth.ts:16-18`");
   expect(markdown).not.toContain("`src/auth.ts:6-8`");
   expect(markdown).toContain("16 |   const [scheme, token] = trimmed.split(' ');");
   expect(markdown).toContain("17 |   if (scheme !== 'Bearer') return null;");
@@ -390,6 +384,7 @@ function assertExpectedWtAPrompt(markdown: string, fixture: MultiWorktreeFixture
   expect(markdown).toContain(
     "Guard against undefined `token` before calling `token.slice(0, 12)`.",
   );
+  expect(markdown).not.toMatch(/\[(BUG|CHANGE|QUESTION|KEEP)\]/);
 
   // Zero leakage from wt-agent-b
   expect(markdown).not.toContain("WT_AGENT_B_OVERALL_SECRET");
@@ -585,7 +580,7 @@ describe("ide2 CLI & Multi-Worktree E2E", () => {
     expect(cliWtBExportRes.stdout).toContain("# Code Review Feedback — `wt-agent-b`");
     expect(cliWtBExportRes.stdout).toContain("WT_AGENT_B_OVERALL_SECRET");
     expect(cliWtBExportRes.stdout).toContain("WT_AGENT_B_BILLING_BUG");
-    expect(cliWtBExportRes.stdout).toContain("`[BUG]` `src/billing.ts:1-3`");
+    expect(cliWtBExportRes.stdout).toContain("## 1. `src/billing.ts:1-3`");
     expect(cliWtBExportRes.stdout).not.toContain("wt-agent-a");
 
     // Nonexistent worktree fails cleanly with exit code 1 and lists available worktrees

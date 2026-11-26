@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { compileFeedbackPromptMarkdown } from "../../shared/prompt-compiler.js";
 import type {
   Annotation,
-  AnnotationIntent,
   AnnotationStatus,
   ChangedFileSummary,
   CodeSymbol,
@@ -1472,13 +1471,6 @@ export interface AnnotationsToolWindowProps {
   onClose?: () => void;
 }
 
-const INTENT_STYLES: Record<AnnotationIntent, { color: string; bg: string }> = {
-  bug: { color: "var(--unsafe)", bg: "var(--unsafe-bg)" },
-  change: { color: "var(--unknown)", bg: "var(--unknown-bg)" },
-  question: { color: "var(--unknown)", bg: "var(--unknown-bg)" },
-  keep: { color: "var(--safe)", bg: "var(--safe-bg)" },
-};
-
 export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
   worktree,
   annotations,
@@ -1652,7 +1644,11 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
           </div>
         ) : (
           filteredList.map((ann) => {
-            const intentStyle = INTENT_STYLES[ann.intent];
+            const lineLabel = ann.startLine
+              ? ann.endLine && ann.endLine !== ann.startLine
+                ? `:${ann.startLine}-${ann.endLine}`
+                : `:${ann.startLine}`
+              : "";
             return (
               <div
                 key={ann.id}
@@ -1698,17 +1694,12 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
                   >
                     <span
                       style={{
-                        fontFamily: "var(--mono)",
-                        fontSize: "10px",
-                        fontWeight: 700,
-                        color: intentStyle.color,
-                        background: intentStyle.bg,
-                        padding: "1px 5px",
-                        borderRadius: "4px",
+                        color: ann.status === "resolved" ? "var(--off)" : "var(--sky)",
+                        fontSize: "11px",
                         flexShrink: 0,
                       }}
                     >
-                      {ann.intent.toUpperCase()}
+                      ◆
                     </span>
                     <span
                       style={{
@@ -1719,8 +1710,24 @@ export const AnnotationsToolWindow: React.FC<AnnotationsToolWindowProps> = ({
                       }}
                     >
                       {ann.filePath}
-                      {ann.startLine ? `:${ann.startLine}` : ""}
+                      {lineLabel}
                     </span>
+                    {ann.status === "outdated" && (
+                      <span
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: "10px",
+                          fontWeight: 600,
+                          color: "var(--unknown)",
+                          background: "var(--unknown-bg)",
+                          padding: "1px 5px",
+                          borderRadius: "4px",
+                          flexShrink: 0,
+                        }}
+                      >
+                        OUTDATED
+                      </span>
+                    )}
                   </button>
 
                   <div style={{ display: "inline-flex", gap: "4px", flexShrink: 0 }}>

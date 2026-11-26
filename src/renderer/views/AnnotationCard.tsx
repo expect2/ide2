@@ -1,46 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { Annotation, AnnotationIntent } from "../../shared/protocol";
-
-export interface AnnotationIntentMeta {
-  intent: AnnotationIntent;
-  label: string;
-  cssClass: string;
-  description: string;
-}
-
-export const ANNOTATION_INTENTS: readonly AnnotationIntentMeta[] = [
-  {
-    intent: "change",
-    label: "CHANGE",
-    cssClass: "intent-change",
-    description: "Request a code or spec modification",
-  },
-  {
-    intent: "bug",
-    label: "BUG",
-    cssClass: "intent-bug",
-    description: "Flag an incorrect behavior or defect",
-  },
-  {
-    intent: "question",
-    label: "QUESTION",
-    cssClass: "intent-question",
-    description: "Ask the agent to clarify or verify",
-  },
-  {
-    intent: "keep",
-    label: "KEEP",
-    cssClass: "intent-keep",
-    description: "Explicitly preserve this implementation",
-  },
-];
-
-export function getIntentMeta(intent: AnnotationIntent): AnnotationIntentMeta {
-  return (
-    ANNOTATION_INTENTS.find((item) => item.intent === intent) ??
-    ANNOTATION_INTENTS[0]!
-  );
-}
+import type { Annotation } from "../../shared/protocol";
 
 export function formatAnnotationRange(
   startLine?: number,
@@ -58,15 +17,11 @@ export interface AnnotationComposerProps {
   side?: "new" | "old";
   startLine?: number;
   endLine?: number;
-  initialIntent?: AnnotationIntent;
   initialComment?: string;
   selectedPreview?: string;
   isEditing?: boolean;
   autoFocus?: boolean;
-  onSubmit: (data: {
-    intent: AnnotationIntent;
-    comment: string;
-  }) => void | Promise<void>;
+  onSubmit: (data: { comment: string }) => void | Promise<void>;
   onCancel: () => void;
 }
 
@@ -75,7 +30,6 @@ export const AnnotationComposer: React.FC<AnnotationComposerProps> = ({
   side,
   startLine,
   endLine,
-  initialIntent = "change",
   initialComment = "",
   selectedPreview,
   isEditing = false,
@@ -83,7 +37,6 @@ export const AnnotationComposer: React.FC<AnnotationComposerProps> = ({
   onSubmit,
   onCancel,
 }) => {
-  const [intent, setIntent] = useState<AnnotationIntent>(initialIntent);
   const [comment, setComment] = useState<string>(initialComment);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -99,7 +52,7 @@ export const AnnotationComposer: React.FC<AnnotationComposerProps> = ({
     if (!trimmed || submitting) return;
     setSubmitting(true);
     try {
-      await onSubmit({ intent, comment: trimmed });
+      await onSubmit({ comment: trimmed });
     } finally {
       setSubmitting(false);
     }
@@ -141,24 +94,6 @@ export const AnnotationComposer: React.FC<AnnotationComposerProps> = ({
           {side === "old" && <span className="ann-side-chip">DELETED</span>}
         </div>
         <span>{isEditing ? "Edit Annotation" : "New Annotation"}</span>
-      </div>
-
-      <div className="ann-intent-pills" role="radiogroup" aria-label="Annotation intent">
-        {ANNOTATION_INTENTS.map((item) => {
-          const active = intent === item.intent;
-          return (
-            <button
-              key={item.intent}
-              type="button"
-              className={`ann-intent-pill ${item.cssClass} ${active ? "active" : ""}`}
-              title={item.description}
-              aria-pressed={active}
-              onClick={() => setIntent(item.intent)}
-            >
-              [{item.label}]
-            </button>
-          );
-        })}
       </div>
 
       {previewLine && (
@@ -221,7 +156,7 @@ export interface AnnotationThreadCardProps {
   compact?: boolean;
   onEdit?: (
     annotation: Annotation,
-    updates: { intent: AnnotationIntent; comment: string },
+    updates: { comment: string },
   ) => void | Promise<void>;
   onResolve?: (annotation: Annotation) => void | Promise<void>;
   onUnresolve?: (annotation: Annotation) => void | Promise<void>;
@@ -242,21 +177,16 @@ export const AnnotationThreadCard: React.FC<AnnotationThreadCardProps> = ({
 
   if (annotations.length === 0) return null;
 
-  // Determine dominant accent color for the card's left border
-  const lead =
-    annotations.find((a) => a.status !== "resolved" && a.intent === "bug") ??
-    annotations.find((a) => a.status !== "resolved") ??
-    annotations[0]!;
+  const allResolved = annotations.every((a) => a.status === "resolved");
 
   return (
     <div
-      className={`ann-card ann-intent-${lead.intent} ${compact ? "ann-compact" : ""}`}
+      className={`ann-card ${allResolved ? "ann-resolved-card" : ""} ${compact ? "ann-compact" : ""}`}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="ann-thread">
         {annotations.map((ann) => {
-          const meta = getIntentMeta(ann.intent);
           const isEditing = editingId === ann.id;
           const rangeText = formatAnnotationRange(
             ann.startLine,
@@ -272,7 +202,6 @@ export const AnnotationThreadCard: React.FC<AnnotationThreadCardProps> = ({
                   side={ann.side}
                   startLine={ann.startLine}
                   endLine={ann.endLine}
-                  initialIntent={ann.intent}
                   initialComment={ann.comment}
                   isEditing
                   onSubmit={async (updates) => {
@@ -292,15 +221,12 @@ export const AnnotationThreadCard: React.FC<AnnotationThreadCardProps> = ({
             >
               <div className="ann-item-head">
                 <div className="ann-item-meta">
-                  <span className={`ann-intent-badge ${meta.cssClass}`}>
-                    [{meta.label}]
-                  </span>
                   <span
                     className={`ann-range-badge ${onJumpTo ? "clickable" : ""}`}
                     onClick={onJumpTo ? () => onJumpTo(ann) : undefined}
                     title={onJumpTo ? "Jump to anchored lines" : undefined}
                   >
-                    {rangeText}
+                    ◆ {rangeText}
                   </span>
                   {ann.status === "outdated" && (
                     <span

@@ -21,7 +21,7 @@ export interface CliExportArgs {
 export async function runCliExport(args: CliExportArgs): Promise<string> {
   const targetInput = args.target ? resolve(args.cwd, args.target) : args.cwd;
   const ctx = await resolveRepoContext(targetInput);
-  const gitService = new WorktreeService();
+  const gitService = new WorktreeService(ctx.repoCommonDir);
   const worktrees = await gitService.discoverWorktrees(ctx.initialWorktreePath);
 
   let selectedWt =

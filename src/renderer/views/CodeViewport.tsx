@@ -10,7 +10,6 @@ import React, {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   Annotation,
-  AnnotationIntent,
   CodeSymbol,
   FileDocument,
   LineBlame,
@@ -48,12 +47,11 @@ export interface CodeViewportProps {
     selectedText: string;
     contextBefore: string;
     contextAfter: string;
-    intent: AnnotationIntent;
     comment: string;
   }) => void | Promise<void>;
   onUpdateAnnotation?: (
     annotation: Annotation,
-    updates: { intent: AnnotationIntent; comment: string },
+    updates: { comment: string },
   ) => void | Promise<void>;
   onResolveAnnotation?: (annotation: Annotation) => void | Promise<void>;
   onUnresolveAnnotation?: (annotation: Annotation) => void | Promise<void>;
@@ -686,7 +684,6 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
     };
 
     const handleSubmitAnnotation = async (data: {
-      intent: AnnotationIntent;
       comment: string;
     }) => {
       if (!composerRange || !onCreateAnnotation) return;
@@ -705,7 +702,6 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
         selectedText,
         contextBefore,
         contextAfter,
-        intent: data.intent,
         comment: data.comment,
       });
       setComposerRange(null);
@@ -932,7 +928,6 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
               const lineMatches = matchesByLine.get(lineNumber) ?? [];
 
               const leadAnn =
-                gutterAnns.find((a) => a.status !== "resolved" && a.intent === "bug") ??
                 gutterAnns.find((a) => a.status !== "resolved") ??
                 gutterAnns[0];
 
@@ -979,7 +974,7 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
                         {leadAnn ? (
                           <button
                             type="button"
-                            className={`code-ann-diamond intent-${leadAnn.intent} ${
+                            className={`code-ann-diamond ${
                               leadAnn.status === "resolved" ? "resolved" : ""
                             }`}
                             title={`${gutterAnns.length} annotation(s) — click to add another`}

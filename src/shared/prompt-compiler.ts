@@ -1,24 +1,9 @@
-import type { Annotation, AnnotationIntent, WorktreeInfo } from "./protocol.js";
-
-const INTENT_LABELS: Record<AnnotationIntent, string> = {
-  bug: "BUG",
-  change: "CHANGE",
-  question: "QUESTION",
-  keep: "KEEP",
-};
-
-const INTENT_ORDER: Record<AnnotationIntent, number> = {
-  bug: 0,
-  change: 1,
-  question: 2,
-  keep: 3,
-};
+import type { Annotation, WorktreeInfo } from "./protocol.js";
 
 export interface CompilePromptInput {
   worktree: Pick<WorktreeInfo, "name" | "path" | "branch" | "baseRef" | "mergeBaseSha" | "headSha">;
   annotations: readonly Annotation[];
   includeOutdated?: boolean;
-  intents?: readonly AnnotationIntent[];
 }
 
 /**
@@ -29,12 +14,10 @@ export function compileFeedbackPromptMarkdown(input: CompilePromptInput): {
   markdown: string;
   includedIds: string[];
 } {
-  const allowedIntents = input.intents ? new Set(input.intents) : null;
   const filtered = input.annotations.filter((a) => {
     if (a.worktreePath !== input.worktree.path) return false;
     if (a.status === "resolved") return false;
     if (a.status === "outdated" && !input.includeOutdated) return false;
-    if (allowedIntents && !allowedIntents.has(a.intent)) return false;
     return true;
   });
 
@@ -51,7 +34,7 @@ export function compileFeedbackPromptMarkdown(input: CompilePromptInput): {
       if (fileCmp !== 0) return fileCmp;
       const lineCmp = (a.startLine ?? 0) - (b.startLine ?? 0);
       if (lineCmp !== 0) return lineCmp;
-      return INTENT_ORDER[a.intent] - INTENT_ORDER[b.intent];
+      return a.createdAt.localeCompare(b.createdAt);
     });
 
   const lines: string[] = [];
@@ -69,8 +52,7 @@ export function compileFeedbackPromptMarkdown(input: CompilePromptInput): {
     lines.push("## Overall Notes");
     lines.push("");
     for (const note of generalNotes) {
-      const prefix = note.intent !== "change" ? `**[${INTENT_LABELS[note.intent]}]** ` : "";
-      lines.push(`${prefix}${note.comment.trim()}`);
+      lines.push(note.comment.trim());
       lines.push("");
     }
   }
@@ -82,12 +64,11 @@ export function compileFeedbackPromptMarkdown(input: CompilePromptInput): {
 
     let idx = 1;
     for (const ann of fileNotes) {
-      const tag = INTENT_LABELS[ann.intent];
       const lineSuffix = formatLineRange(ann.startLine, ann.endLine);
       const sideNote = ann.side === "old" ? " *(deleted in diff)*" : "";
       const outdatedNote = ann.status === "outdated" ? " *(note: code changed since annotated)*" : "";
 
-      lines.push(`## ${idx}. \`[${tag}]\` \`${ann.filePath}${lineSuffix}\`${sideNote}${outdatedNote}`);
+      lines.push(`## ${idx}. \`${ann.filePath}${lineSuffix}\`${sideNote}${outdatedNote}`);
 
       if (ann.anchor?.selectedText) {
         const snippetLines = ann.anchor.selectedText.split(/\r?\n/);

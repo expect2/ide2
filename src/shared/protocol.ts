@@ -196,7 +196,6 @@ export interface FuzzyFileHit {
   score: number;
 }
 
-export type AnnotationIntent = "change" | "bug" | "question" | "keep";
 export type AnnotationStatus = "open" | "outdated" | "resolved";
 
 export interface Annotation {
@@ -210,7 +209,6 @@ export interface Annotation {
   startLine?: number;
   /** 1-based inclusive end line. */
   endLine?: number;
-  intent: AnnotationIntent;
   comment: string;
   anchor?: {
     selectedText: string;
@@ -230,7 +228,6 @@ export interface CreateAnnotationInput {
   side?: "new" | "old";
   startLine?: number;
   endLine?: number;
-  intent: AnnotationIntent;
   comment: string;
   selectedText?: string;
   contextBefore?: string;
@@ -242,14 +239,12 @@ export interface CreateAnnotationInput {
 export interface UpdateAnnotationInput {
   id: string;
   comment?: string;
-  intent?: AnnotationIntent;
   status?: AnnotationStatus;
 }
 
 export interface ExportPromptOptions {
   worktreePath: string;
   includeOutdated?: boolean;
-  intents?: AnnotationIntent[];
   resolveAfterExport?: boolean;
 }
 

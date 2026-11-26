@@ -126,7 +126,6 @@ export class AnnotationStore {
       side: input.side ?? (filePath ? "new" : undefined),
       startLine: input.startLine,
       endLine,
-      intent: input.intent,
       comment: input.comment,
       anchor:
         input.selectedText !== undefined || input.contentHash !== undefined
@@ -148,7 +147,7 @@ export class AnnotationStore {
     return { ...annotation, anchor: annotation.anchor ? { ...annotation.anchor } : undefined };
   }
 
-  /** Updates an existing annotation's comment, intent, or status. */
+  /** Updates an existing annotation's comment or status. */
   async update(input: UpdateAnnotationInput): Promise<Annotation> {
     await this.ensureLoaded();
     const idx = this.annotations.findIndex((a) => a.id === input.id);
@@ -159,7 +158,6 @@ export class AnnotationStore {
     const updated: Annotation = {
       ...existing,
       comment: input.comment !== undefined ? input.comment : existing.comment,
-      intent: input.intent !== undefined ? input.intent : existing.intent,
       status: input.status !== undefined ? input.status : existing.status,
       updatedAt: new Date().toISOString(),
     };
@@ -296,7 +294,6 @@ export class AnnotationStore {
       worktree: normalizedWorktree,
       annotations: this.annotations,
       includeOutdated: options.includeOutdated,
-      intents: options.intents,
     });
 
     if (options.resolveAfterExport && includedIds.length > 0) {

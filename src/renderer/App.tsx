@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Annotation,
-  AnnotationIntent,
   AnnotationStatus,
   ChangedFileSummary,
   CodeSymbol,
@@ -572,7 +571,6 @@ export const App: React.FC = () => {
       const res = await window.ide2.compileFeedbackPrompt({
         worktreePath: activeWorktreePath,
         includeOutdated: opts?.includeOutdated,
-        intents: opts?.intents,
         resolveAfterExport: opts?.resolveAfterExport,
       });
       if (!res.markdown) {
@@ -948,7 +946,6 @@ export const App: React.FC = () => {
     const fileAnns = worktreeAnnotations.filter((a) => a.filePath === tab.filePath);
 
     const onCreateAnn = async (input: {
-      intent: AnnotationIntent;
       comment: string;
       startLine?: number;
       endLine?: number;
@@ -963,7 +960,6 @@ export const App: React.FC = () => {
         side: input.side ?? "new",
         startLine: input.startLine,
         endLine: input.endLine,
-        intent: input.intent,
         comment: input.comment,
         selectedText: input.selectedText,
         contextBefore: input.contextBefore,
@@ -971,16 +967,15 @@ export const App: React.FC = () => {
         contentHash: doc?.contentHash,
         language: doc?.language,
       });
-      showToast(`Added [${input.intent.toUpperCase()}] annotation on ${tab.filePath}`);
+      showToast(`Added annotation on ${tab.filePath}`);
     };
 
     const onEditAnn = async (
       ann: Annotation,
-      updates: { intent: AnnotationIntent; comment: string },
+      updates: { comment: string },
     ) => {
       await window.ide2.updateAnnotation({
         id: ann.id,
-        intent: updates.intent,
         comment: updates.comment,
       });
     };
@@ -1607,7 +1602,6 @@ export const App: React.FC = () => {
                 } else {
                   await window.ide2.createAnnotation({
                     worktreePath: activeWorktreePath,
-                    intent: "change",
                     comment,
                   });
                 }

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { compileFeedbackPromptMarkdown } from "../../shared/prompt-compiler.js";
 import type {
   Annotation,
-  AnnotationIntent,
   CodeSymbol,
   ExportPromptOptions,
   FileDocument,
@@ -1521,13 +1520,6 @@ export interface ExportPromptModalProps {
   onClose: () => void;
 }
 
-const ALL_INTENTS: readonly { id: AnnotationIntent; label: string }[] = [
-  { id: "bug", label: "BUG" },
-  { id: "change", label: "CHANGE" },
-  { id: "question", label: "QUESTION" },
-  { id: "keep", label: "KEEP" },
-];
-
 export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
   open,
   worktree,
@@ -1536,12 +1528,6 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
   onCopyFeedbackPrompt,
   onClose,
 }) => {
-  const [selectedIntents, setSelectedIntents] = useState<AnnotationIntent[]>([
-    "bug",
-    "change",
-    "question",
-    "keep",
-  ]);
   const [includeOutdated, setIncludeOutdated] = useState<boolean>(false);
   const [resolveAfterCopy, setResolveAfterCopy] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
@@ -1558,18 +1544,11 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
         worktree,
         annotations,
         includeOutdated,
-        intents: selectedIntents,
       }),
-    [worktree, annotations, includeOutdated, selectedIntents],
+    [worktree, annotations, includeOutdated],
   );
 
   if (!open) return null;
-
-  const toggleIntent = (intent: AnnotationIntent) => {
-    setSelectedIntents((prev) =>
-      prev.includes(intent) ? prev.filter((i) => i !== intent) : [...prev, intent],
-    );
-  };
 
   const handleCopy = async () => {
     if (!compiled.markdown) return;
@@ -1577,7 +1556,6 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
       {
         worktreePath: worktree.path,
         includeOutdated,
-        intents: selectedIntents,
         resolveAfterExport: resolveAfterCopy,
       },
       compiled.markdown,
@@ -1648,61 +1626,37 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
           </button>
         </div>
 
-        {/* Filters & Toggles */}
+        {/* Options */}
         <div
           style={{
             display: "flex",
             flexWrap: "wrap",
             alignItems: "center",
-            justifyContent: "space-between",
-            gap: "8px",
+            justifyContent: "flex-end",
+            gap: "14px",
             padding: "8px 14px",
             borderBottom: "1px solid var(--faint)",
             background: "var(--wash)",
+            fontSize: "12px",
+            color: "var(--dim)",
           }}
         >
-          <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-            <span style={{ color: "var(--dim)", fontSize: "11.5px", marginRight: "4px" }}>
-              Intents:
-            </span>
-            {ALL_INTENTS.map((item) => {
-              const active = selectedIntents.includes(item.id);
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => toggleIntent(item.id)}
-                  style={{
-                    ...(active ? activePillBtnStyle : pillBtnStyle),
-                    fontFamily: "var(--mono)",
-                    fontSize: "10.5px",
-                  }}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div style={{ display: "inline-flex", alignItems: "center", gap: "14px", fontSize: "12px", color: "var(--dim)" }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={includeOutdated}
-                onChange={(e) => setIncludeOutdated(e.target.checked)}
-              />
-              <span>Include outdated</span>
-            </label>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={resolveAfterCopy}
-                onChange={(e) => setResolveAfterCopy(e.target.checked)}
-              />
-              <span>Mark resolved after copy</span>
-            </label>
-          </div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={includeOutdated}
+              onChange={(e) => setIncludeOutdated(e.target.checked)}
+            />
+            <span>Include outdated</span>
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={resolveAfterCopy}
+              onChange={(e) => setResolveAfterCopy(e.target.checked)}
+            />
+            <span>Mark resolved after copy</span>
+          </label>
         </div>
 
         {/* Markdown Preview */}
@@ -1720,7 +1674,7 @@ export const ExportPromptModal: React.FC<ExportPromptModalProps> = ({
             whiteSpace: "pre-wrap",
           }}
         >
-          {compiled.markdown || "No matching annotations for the selected filters."}
+          {compiled.markdown || "No open annotations yet."}
         </pre>
 
         {/* Footer */}

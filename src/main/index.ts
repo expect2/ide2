@@ -191,7 +191,7 @@ async function getOrCreateRepoSession(flags: ParsedProcessFlags): Promise<{
     };
   }
 
-  const git = new WorktreeService();
+  const git = new WorktreeService(baseCtx.repoCommonDir);
   const worktrees = await git.discoverWorktrees(baseCtx.initialWorktreePath);
   const initialWorktreePath = selectInitialWorktree(worktrees);
   const annotations = new AnnotationStore(baseCtx.repoCommonDir);
@@ -211,7 +211,7 @@ async function getOrCreateRepoSession(flags: ParsedProcessFlags): Promise<{
       if (!sessionRef) return;
       sessionRef.gitStatusCache.delete(worktreePath);
       intel.invalidateWorktree(worktreePath, changedFiles);
-      const updatedWorktrees = await git.discoverWorktrees(worktreePath);
+      const updatedWorktrees = await git.discoverWorktrees(baseCtx.initialWorktreePath);
 
       // Reconcile annotations for any changed files so line numbers stay accurate live
       let reconciledAny = false;
@@ -562,7 +562,8 @@ function registerIpcHandlers(): void {
     "ide2:readAssetDataUrl",
     async (evt, worktreePath: string, relativeFromFile: string, rawHref: string) => {
       const { session } = getWindowSession(evt.sender);
-      return session.git.readAssetDataUrl(worktreePath, relativeFromFile, rawHref);
+      const safeWt = assertRegisteredWorktree(session, worktreePath);
+      return session.git.readAssetDataUrl(safeWt, relativeFromFile, rawHref);
     },
   );
 
@@ -570,7 +571,12 @@ function registerIpcHandlers(): void {
     "ide2:getDiff",
     async (evt, worktreePath: string, filePath: string, scope: DiffScope) => {
       const { session } = getWindowSession(evt.sender);
-      return session.git.getDiff(worktreePath, filePath, scope);
+      const safeWt = assertRegisteredWorktree(session, worktreePath);
+      const safeScope: DiffScope =
+        scope.kind === "worktree"
+          ? { kind: "worktree", otherWorktreePath: assertRegisteredWorktree(session, scope.otherWorktreePath) }
+          : scope;
+      return session.git.getDiff(safeWt, filePath, safeScope);
     },
   );
 
@@ -578,28 +584,36 @@ function registerIpcHandlers(): void {
     "ide2:listChangedFiles",
     async (evt, worktreePath: string, scope: DiffScope) => {
       const { session } = getWindowSession(evt.sender);
-      return session.git.listChangedFiles(worktreePath, scope);
+      const safeWt = assertRegisteredWorktree(session, worktreePath);
+      const safeScope: DiffScope =
+        scope.kind === "worktree"
+          ? { kind: "worktree", otherWorktreePath: assertRegisteredWorktree(session, scope.otherWorktreePath) }
+          : scope;
+      return session.git.listChangedFiles(safeWt, safeScope);
     },
   );
 
   ipcMain.handle("ide2:listCommits", async (evt, worktreePath: string, limit?: number) => {
     const { session } = getWindowSession(evt.sender);
-    return session.git.listCommits(worktreePath, limit);
+    const safeWt = assertRegisteredWorktree(session, worktreePath);
+    return session.git.listCommits(safeWt, limit);
   });
 
   ipcMain.handle("ide2:getBlame", async (evt, worktreePath: string, filePath: string) => {
     const { session } = getWindowSession(evt.sender);
-    return session.git.getBlame(worktreePath, filePath);
+    const safeWt = assertRegisteredWorktree(session, worktreePath);
+    return session.git.getBlame(safeWt, filePath);
   });
 
   ipcMain.handle("ide2:getStructure", async (evt, worktreePath: string, filePath: string) => {
     const { session } = getWindowSession(evt.sender);
-    const doc = await session.git.readFile(worktreePath, filePath);
+    const safeWt = assertRegisteredWorktree(session, worktreePath);
+    const doc = await session.git.readFile(safeWt, filePath);
     if (doc.isBinary) return [];
     const cacheKey = `${doc.language}:${doc.contentHash}`;
     const cached = session.analysisCache.get(cacheKey);
     if (cached) return cached.symbols;
-    return intel.getStructure(worktreePath, filePath, doc.lines.join("\n"));
+    return intel.getStructure(safeWt, filePath, doc.lines.join("\n"));
   });
 
   ipcMain.handle(
@@ -672,12 +686,13 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("ide2:compileFeedbackPrompt", async (evt, options: ExportPromptOptions) => {
     const { session } = getWindowSession(evt.sender);
-    const wts = await session.git.discoverWorktrees(options.worktreePath);
-    const wt = wts.find((w) => w.path === options.worktreePath) ?? wts[0];
+    const safeWt = assertRegisteredWorktree(session, options.worktreePath);
+    const wts = await session.git.discoverWorktrees(session.context.initialWorktreePath);
+    const wt = wts.find((w) => w.path === safeWt) ?? wts[0];
     if (!wt) {
       return { markdown: "", count: 0 };
     }
-    const res = await session.annotations.compilePrompt(wt, options);
+    const res = await session.annotations.compilePrompt(wt, { ...options, worktreePath: safeWt });
     if (options.resolveAfterExport && res.count > 0) {
       const all = await session.annotations.list();
       broadcastToSession(session, {
@@ -710,8 +725,9 @@ function registerIpcHandlers(): void {
       params: { baseWorktreePath: string; branchName: string; baseRef?: string; targetDir?: string },
     ) => {
       const { session } = getWindowSession(evt.sender);
-      const created = await session.git.createWorktree(params);
-      const updatedWorktrees = await session.git.discoverWorktrees(created.path);
+      const safeBase = assertRegisteredWorktree(session, params.baseWorktreePath);
+      const created = await session.git.createWorktree({ ...params, baseWorktreePath: safeBase });
+      const updatedWorktrees = await session.git.discoverWorktrees(session.context.initialWorktreePath);
       session.watcher.resetWatches(updatedWorktrees, session.context.repoCommonDir);
       broadcastToSession(session, {
         type: "worktrees-updated",

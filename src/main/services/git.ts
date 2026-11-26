@@ -88,6 +88,15 @@ interface ExecGitOptions {
   allowWorktreeAdd?: boolean;
 }
 
+function cleanGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_COMMON_DIR;
+  delete env.GIT_INDEX_FILE;
+  return env;
+}
+
 async function runGit(
   cwd: string,
   args: readonly string[],
@@ -96,6 +105,7 @@ async function runGit(
   const safeArgs = buildSafeGitArgs(args, options);
   const { stdout } = await execFileAsync("git", safeArgs, {
     cwd,
+    env: cleanGitEnv(),
     maxBuffer: MAX_BUFFER_BYTES,
     encoding: "utf8",
   });
@@ -109,6 +119,7 @@ async function runGitBuffer(
   const safeArgs = buildSafeGitArgs(args);
   const { stdout } = await execFileAsync("git", safeArgs, {
     cwd,
+    env: cleanGitEnv(),
     maxBuffer: MAX_BUFFER_BYTES,
     encoding: "buffer",
   });
@@ -292,6 +303,7 @@ interface ParsedWorktreeBlock {
   branch: string;
   bare: boolean;
   detached: boolean;
+  prunable: boolean;
 }
 
 function parsePorcelainWorktrees(output: string): ParsedWorktreeBlock[] {
@@ -304,6 +316,7 @@ function parsePorcelainWorktrees(output: string): ParsedWorktreeBlock[] {
     let branch = "(detached)";
     let bare = false;
     let detached = false;
+    let prunable = false;
 
     for (const line of block.split(/\r?\n/)) {
       if (line.startsWith("worktree ")) {
@@ -318,11 +331,13 @@ function parsePorcelainWorktrees(output: string): ParsedWorktreeBlock[] {
       } else if (line === "detached") {
         detached = true;
         branch = "(detached)";
+      } else if (line === "prunable" || line.startsWith("prunable ")) {
+        prunable = true;
       }
     }
 
     if (wtPath) {
-      blocks.push({ path: wtPath, headSha, branch, bare, detached });
+      blocks.push({ path: wtPath, headSha, branch, bare, detached, prunable });
     }
   }
   return blocks;
@@ -592,6 +607,11 @@ function parseZeroContextDiffMarkers(
  */
 export class WorktreeService {
   private readonly cache = new Map<string, WorktreeInfo>();
+  private readonly expectedCommonDir?: string;
+
+  constructor(expectedCommonDir?: string) {
+    this.expectedCommonDir = expectedCommonDir ? tryRealpath(expectedCommonDir) : undefined;
+  }
 
   /** Returns cached worktree metadata in O(1) without spawning git. */
   getCachedWorktree(worktreePath: string): WorktreeInfo | undefined {
@@ -613,8 +633,8 @@ export class WorktreeService {
   }
 
   /**
-   * Discovers all worktrees in the repository containing `anyRepoPath`,
-   * populating counts, base refs, merge-base SHAs, and updating the in-memory cache.
+   * Discovers all worktrees strictly belonging to the repository's `git-common-dir`,
+   * excluding bare, prunable, missing, or unrelated-repository directories.
    */
   async discoverWorktrees(anyRepoPath: string): Promise<WorktreeInfo[]> {
     const canonStart = tryRealpath(anyRepoPath);
@@ -622,19 +642,47 @@ export class WorktreeService {
       ? dirname(canonStart)
       : canonStart;
 
+    const rawStartCommon = await runGit(startDir, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]);
+    const targetCommonDir = this.expectedCommonDir ?? tryRealpath(rawStartCommon.trim());
+    if (tryRealpath(rawStartCommon.trim()) !== targetCommonDir) {
+      return this.listCachedWorktrees();
+    }
+
     const rawPorcelain = await runGit(startDir, ["worktree", "list", "--porcelain"]);
     const blocks = parsePorcelainWorktrees(rawPorcelain);
 
-    const validBlocks = blocks
+    const candidateBlocks = blocks
       .map((block, idx) => ({ block, isMain: idx === 0 }))
-      .filter(({ block }) => !block.bare && existsSync(block.path));
+      .filter(({ block }) => !block.bare && !block.prunable && existsSync(block.path));
 
-    const results = await Promise.all(
-      validBlocks.map(async ({ block, isMain }) => {
-        const canonPath = realpathSync(block.path);
+    const verified = await Promise.all(
+      candidateBlocks.map(async ({ block, isMain }) => {
+        const canonPath = tryRealpath(block.path);
+        const [wtCommonRaw, wtToplevelRaw] = await Promise.all([
+          tryRunGit(canonPath, [
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+          ]),
+          tryRunGit(canonPath, ["rev-parse", "--show-toplevel"]),
+        ]);
+        if (
+          !wtCommonRaw ||
+          !wtToplevelRaw ||
+          tryRealpath(wtCommonRaw.trim()) !== targetCommonDir ||
+          tryRealpath(wtToplevelRaw.trim()) !== canonPath
+        ) {
+          return null;
+        }
         return this.inspectWorktree(canonPath, block, isMain);
       }),
     );
+
+    const results = verified.filter((w): w is WorktreeInfo => w !== null);
 
     const activePaths = new Set(results.map((r) => r.path));
     for (const existingPath of this.cache.keys()) {

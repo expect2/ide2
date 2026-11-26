@@ -13,7 +13,6 @@ import YAML from "yaml";
 import type * as Mdast from "mdast";
 import type {
   Annotation,
-  AnnotationIntent,
   CodeSymbol,
   FileDocument,
   LineBlame,
@@ -44,12 +43,11 @@ export interface MarkdownViewerProps {
     selectedText: string;
     contextBefore: string;
     contextAfter: string;
-    intent: AnnotationIntent;
     comment: string;
   }) => void | Promise<void>;
   onUpdateAnnotation?: (
     annotation: Annotation,
-    updates: { intent: AnnotationIntent; comment: string },
+    updates: { comment: string },
   ) => void | Promise<void>;
   onResolveAnnotation?: (annotation: Annotation) => void | Promise<void>;
   onUnresolveAnnotation?: (annotation: Annotation) => void | Promise<void>;
@@ -1049,7 +1047,6 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
   }, [ast, annotations]);
 
   const handleSubmitBlockAnnotation = async (data: {
-    intent: AnnotationIntent;
     comment: string;
   }) => {
     if (!composerRange || !onCreateAnnotation) return;
@@ -1068,7 +1065,6 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
       selectedText,
       contextBefore,
       contextAfter,
-      intent: data.intent,
       comment: data.comment,
     });
     setComposerRange(null);

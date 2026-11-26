@@ -358,4 +358,41 @@ describe("git.ts: resolveRepoContext & WorktreeService", () => {
     const allChanged = events.flatMap((e) => e.changedFiles);
     expect(allChanged.some((f) => f.includes("node_modules"))).toBe(false);
   });
+
+  it("strictly scopes discovered worktrees to the opened repoCommonDir and excludes foreign or repurposed repos", async () => {
+    const { mainDir, linkedDir, root } = createRepoWithWorktrees();
+    const repoCommonDir = realpathSync(join(mainDir, ".git"));
+
+    // Create a second independent git repository next to repo-main
+    const otherRepoDir = join(root, "other-repo");
+    mkdirSync(otherRepoDir, { recursive: true });
+    git(otherRepoDir, ["init", "-b", "main"]);
+    git(otherRepoDir, ["config", "user.email", "test@example.com"]);
+    git(otherRepoDir, ["config", "user.name", "Test User"]);
+    writeFileSync(join(otherRepoDir, "README.md"), "# Other Repo\n", "utf8");
+    git(otherRepoDir, ["add", "."]);
+    git(otherRepoDir, ["commit", "-m", "init other"]);
+
+    const service = new WorktreeService(repoCommonDir);
+    const initial = await service.discoverWorktrees(mainDir);
+    expect(initial.map((w) => w.path).sort()).toEqual([linkedDir, mainDir].sort());
+
+    // Querying with another repository's path must never pivot or leak the other repo's worktrees
+    const afterForeignQuery = await service.discoverWorktrees(otherRepoDir);
+    expect(afterForeignQuery.map((w) => w.path).sort()).toEqual([linkedDir, mainDir].sort());
+    expect(afterForeignQuery.some((w) => w.path.includes("other-repo"))).toBe(false);
+
+    // Replace the linked worktree directory with an unrelated standalone git repo -> must be excluded
+    rmSync(linkedDir, { recursive: true, force: true });
+    mkdirSync(linkedDir, { recursive: true });
+    git(linkedDir, ["init", "-b", "foreign"]);
+    git(linkedDir, ["config", "user.email", "test@example.com"]);
+    git(linkedDir, ["config", "user.name", "Test User"]);
+    writeFileSync(join(linkedDir, "README.md"), "# Hijacked\n", "utf8");
+    git(linkedDir, ["add", "."]);
+    git(linkedDir, ["commit", "-m", "hijack"]);
+
+    const afterHijack = await service.discoverWorktrees(mainDir);
+    expect(afterHijack.map((w) => w.path)).toEqual([mainDir]);
+  });
 });
