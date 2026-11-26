@@ -74,8 +74,8 @@ Works on **macOS**, **Linux**, and **Windows** (Git Bash / WSL).
 ### Install from source
 
 ```bash
-git clone https://github.com/expect2/expect2-ide.git
-cd expect2-ide
+git clone https://github.com/expect2/ide2.git
+cd ide2
 ./install.sh
 ```
 

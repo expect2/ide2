@@ -52,7 +52,7 @@ if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/package.json" ] && grep -qE '"n
   APP_DIR="${SCRIPT_DIR}"
   ok "using checkout at ${APP_DIR}"
 else
-  REPO_URL="${IDE2_REPO_URL:-https://github.com/expect2/expect2-ide.git}"
+  REPO_URL="${IDE2_REPO_URL:-https://github.com/expect2/ide2.git}"
   APP_DIR="${INSTALL_HOME}/app"
   if [ -d "${APP_DIR}/.git" ]; then
     info "updating ${APP_DIR}..."
