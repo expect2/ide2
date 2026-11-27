@@ -39,7 +39,7 @@ const jobs: Promise<Bun.BuildOutput>[] = [
     format: "cjs",
     naming: "index.cjs",
     sourcemap: "external",
-    external: NODE_EXTERNALS,
+    external: [...NODE_EXTERNALS, "esbuild", "typescript"],
   }),
   // 2. Electron Preload Bridge (must be CJS for sandboxed renderer)
   Bun.build({
@@ -51,7 +51,7 @@ const jobs: Promise<Bun.BuildOutput>[] = [
     sourcemap: "external",
     external: ["electron"],
   }),
-  // 3. Headless CLI `--export` & `tour` entries
+  // 3. Headless CLI `--export`, `tour`, `daemon` (SSH), and `plugin` entries
   Bun.build({
     entrypoints: [resolve(ROOT, "src/cli/export.ts")],
     outdir: resolve(DIST, "cli"),
@@ -67,6 +67,33 @@ const jobs: Promise<Bun.BuildOutput>[] = [
     target: "node",
     format: "cjs",
     naming: "tour.cjs",
+    sourcemap: "external",
+    external: NODE_EXTERNALS,
+  }),
+  Bun.build({
+    entrypoints: [resolve(ROOT, "src/cli/daemon.ts")],
+    outdir: resolve(DIST, "cli"),
+    target: "node",
+    format: "cjs",
+    naming: "daemon.cjs",
+    sourcemap: "external",
+    external: [...NODE_EXTERNALS, "esbuild", "typescript"],
+  }),
+  Bun.build({
+    entrypoints: [resolve(ROOT, "src/cli/plugin.ts")],
+    outdir: resolve(DIST, "cli"),
+    target: "node",
+    format: "cjs",
+    naming: "plugin.cjs",
+    sourcemap: "external",
+    external: [...NODE_EXTERNALS, "esbuild", "typescript"],
+  }),
+  Bun.build({
+    entrypoints: [resolve(ROOT, "src/main/plugins/plugin-runner.ts")],
+    outdir: resolve(DIST, "main"),
+    target: "node",
+    format: "cjs",
+    naming: "plugin-runner.cjs",
     sourcemap: "external",
     external: NODE_EXTERNALS,
   }),

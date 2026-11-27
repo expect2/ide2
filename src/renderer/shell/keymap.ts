@@ -27,6 +27,8 @@ export type IdeAction =
   | "copy-feedback-prompt"
   | "switch-worktree"
   | "open-project-window"
+  | "connect-ssh"
+  | "manage-plugins"
   | "copy-walkthrough-prompt"
   | "show-onboarding"
   | "close-tab"
@@ -198,6 +200,18 @@ export const IDE_ACTIONS: readonly ActionDescriptor[] = [
     label: "Open Project in New Window…",
     description: "Choose another Git repository to open in a new ide2 window",
     category: "Navigation",
+  },
+  {
+    action: "connect-ssh",
+    label: "Connect to Remote via SSH…",
+    description: "Open a remote repository over SSH using the headless ide2 daemon",
+    category: "Navigation",
+  },
+  {
+    action: "manage-plugins",
+    label: "Manage Plugins…",
+    description: "Install, update, enable, or remove ide2 plugins from GitHub repositories",
+    category: "Tool Windows",
   },
   {
     action: "copy-walkthrough-prompt",
@@ -545,6 +559,10 @@ export function formatShortcut(action: IdeAction, platform: Platform): string {
       return isMac ? "⇧⌘N" : "Ctrl+Shift+N";
     case "copy-walkthrough-prompt":
       return isMac ? "⇧⌘T" : "Ctrl+Shift+T";
+    case "connect-ssh":
+      return "";
+    case "manage-plugins":
+      return "";
     case "show-onboarding":
       return "";
     case "close-tab":

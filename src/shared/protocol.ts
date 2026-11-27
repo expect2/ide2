@@ -1,7 +1,18 @@
 /**
  * Shared RPC & Domain Protocol for expect2 IDE (`ide2`).
- * Single source of truth across Main, Worker, Preload, Renderer, and CLI (`--export`).
+ * Single source of truth across Main, Worker, Preload, Renderer, Daemon, and CLI (`--export`).
  */
+
+export * from "./plugin-protocol.js";
+import type {
+  InstalledPluginInfo,
+  InstallPluginParams,
+  InstallPluginResult,
+  PluginAgentCardState,
+  PluginLineDecoration,
+  RemoteConnectionState,
+  UpdatePluginResult,
+} from "./plugin-protocol.js";
 
 export type FileGitStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted" | "clean";
 
@@ -257,6 +268,11 @@ export interface LaunchContext {
   initialColumn?: number;
   initialDiffMode?: boolean;
   initialBaseRef?: string;
+  /** Git `remote.origin.url` if configured on the repository */
+  remoteOriginUrl?: string;
+  /** Present when backed by a Remote SSH Daemon session */
+  sshTarget?: string;
+  sshHost?: string;
   platform: "darwin" | "linux" | "win32";
 }
 
@@ -265,6 +281,8 @@ export interface RecentProject {
   repoCommonDir: string;
   name: string;
   lastOpenedAt: number;
+  isRemote?: boolean;
+  sshTarget?: string;
 }
 
 export interface OpenProjectResult {
@@ -272,6 +290,8 @@ export interface OpenProjectResult {
   reused?: boolean;
   canceled?: boolean;
   repoName?: string;
+  needsBootstrap?: boolean;
+  sshTarget?: string;
   error?: string;
 }
 
@@ -379,6 +399,22 @@ export type WorkspaceEvent =
   | {
       type: "review-updated";
       reviews: ReviewSessionState[];
+    }
+  | {
+      type: "connection-updated";
+      connection: RemoteConnectionState;
+    }
+  | {
+      type: "plugins-updated";
+      plugins: InstalledPluginInfo[];
+      decorations: PluginLineDecoration[];
+      cards: PluginAgentCardState[];
+    }
+  | {
+      type: "plugin-event";
+      pluginId: string;
+      event: string;
+      payload: unknown;
     };
 
 export interface Ide2Bridge {
@@ -389,6 +425,10 @@ export interface Ide2Bridge {
     walkthroughs: WalkthroughState[];
     reviews: ReviewSessionState[];
     showOnboarding: boolean;
+    connection: RemoteConnectionState;
+    plugins: InstalledPluginInfo[];
+    pluginDecorations: PluginLineDecoration[];
+    pluginCards: PluginAgentCardState[];
   }>;
   listFiles(worktreePath: string): Promise<FileEntry[]>;
   fuzzyFindFiles(params: {
@@ -427,6 +467,15 @@ export interface Ide2Bridge {
   revealInOs(targetPath: string): Promise<void>;
   createWorktree(params: { baseWorktreePath: string; branchName: string; baseRef?: string; targetDir?: string }): Promise<WorktreeInfo>;
   openProjectWindow(targetPath?: string): Promise<OpenProjectResult>;
+  connectSshWindow(params: {
+    sshTarget: string;
+    sshOptions?: string;
+    diff?: boolean;
+    worktree?: string;
+    autoBootstrap?: boolean;
+  }): Promise<OpenProjectResult>;
+  bootstrapRemoteSsh(): Promise<{ ok: boolean; error?: string }>;
+  reconnectRemoteSsh(): Promise<{ ok: boolean; error?: string }>;
   listRecentProjects(): Promise<RecentProject[]>;
   respondWalkthrough(response: WalkthroughUserResponse): Promise<void>;
   endWalkthrough(sessionId?: string): Promise<void>;
@@ -434,5 +483,39 @@ export interface Ide2Bridge {
   sendReviewResponse(response: ReviewUserResponse): Promise<{ sent: boolean; count: number }>;
   getReviewAgentPrompt(): Promise<string>;
   completeOnboarding(): Promise<void>;
+  listPlugins(): Promise<InstalledPluginInfo[]>;
+  installPlugin(params: InstallPluginParams): Promise<InstallPluginResult>;
+  setPluginEnabled(params: {
+    pluginId: string;
+    enabled: boolean;
+    scope?: "local" | "remote";
+  }): Promise<InstalledPluginInfo[]>;
+  updatePlugin(params: {
+    pluginId: string;
+    scope?: "local" | "remote";
+    approvePermissions?: boolean;
+  }): Promise<UpdatePluginResult>;
+  removePlugin(params: {
+    pluginId: string;
+    scope?: "local" | "remote";
+  }): Promise<InstalledPluginInfo[]>;
+  callPluginRpc(params: {
+    pluginId: string;
+    method: string;
+    payload?: unknown;
+    worktreePath?: string;
+  }): Promise<unknown>;
+  triggerPluginAction(params: {
+    pluginId: string;
+    actionId: string;
+    worktreePath?: string;
+    filePath?: string;
+    line?: number;
+  }): Promise<void>;
+  respondPluginCard(params: {
+    sessionId: string;
+    action: string;
+    message?: string;
+  }): Promise<void>;
   onEvent(listener: (event: WorkspaceEvent) => void): () => void;
 }

@@ -10,37 +10,50 @@ import {
   shell,
   type WebContents,
 } from "electron";
-import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { LocalWorkspaceBackend } from "./backend/local-backend.js";
+import {
+  RemoteBootstrapRequiredError,
+  SshWorkspaceBackend,
+} from "./backend/ssh-backend.js";
+import type { WorkspaceBackend } from "./backend/workspace-backend.js";
 import { IntelClient } from "./intel/client.js";
-import { AnnotationStore } from "./services/annotations.js";
-import { resolveRepoContext, WorktreeService } from "./services/git.js";
+import { PLUGIN_SHIM_MODULES } from "./plugins/bundler.js";
+import { PluginInstaller } from "./plugins/installer.js";
+import { PluginHost } from "./plugins/plugin-host.js";
 import { PreferencesStore } from "./services/preferences.js";
 import { RecentProjectsStore } from "./services/recent-projects.js";
 import { TourServer } from "./services/tour-server.js";
-import { MultiWorktreeWatcher } from "./services/watcher.js";
 import {
   buildReviewAgentPrompt,
   buildWalkthroughAgentPrompt,
 } from "../shared/walkthrough-prompt.js";
-import type {
-  CodeSymbol,
-  CreateAnnotationInput,
-  DiffScope,
-  ExportPromptOptions,
-  FileGitStatus,
-  FindInPathQuery,
-  LaunchContext,
-  OpenProjectResult,
-  ReviewUserResponse,
-  TokenSpan,
-  UpdateAnnotationInput,
-  WalkthroughUserResponse,
-  WorkspaceEvent,
+import {
+  parseSshTarget,
+  type CreateAnnotationInput,
+  type DiffScope,
+  type ExportPromptOptions,
+  type FindInPathQuery,
+  type InstalledPluginInfo,
+  type InstallPluginParams,
+  type InstallPluginResult,
+  type LaunchContext,
+  type OpenProjectResult,
+  type PluginAgentCardState,
+  type PluginLineDecoration,
+  type ReviewUserResponse,
+  type UpdateAnnotationInput,
+  type UpdatePluginResult,
+  type WalkthroughUserResponse,
+  type WorkspaceEvent,
 } from "../shared/protocol.js";
 
-const DIST_ROOT = resolve(app.getAppPath(), "dist");
+const APP_ROOT = app.getAppPath();
+const DIST_ROOT = resolve(APP_ROOT, "dist");
 const RENDERER_ROOT = resolve(DIST_ROOT, "renderer");
+const BUILTIN_PR_PLUGIN_DIR = resolve(APP_ROOT, "plugins/pr-checks");
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -66,13 +79,218 @@ const STATIC_MIME: Record<string, string> = {
   ".png": "image/png",
 };
 
+interface ParsedProcessFlags {
+  cwd: string;
+  target: string;
+  sshTarget?: string;
+  sshOptions?: string;
+  autoBootstrap?: boolean;
+  diff: boolean;
+  base?: string;
+  worktree?: string;
+}
+
+function parseFlags(argv: readonly string[], fallbackCwd: string): ParsedProcessFlags {
+  let cwd = fallbackCwd;
+  let target: string | undefined;
+  let sshTarget: string | undefined;
+  let sshOptions: string | undefined;
+  let autoBootstrap = false;
+  let diff = false;
+  let base: string | undefined;
+  let worktree: string | undefined;
+
+  for (const arg of argv) {
+    if (arg.startsWith("--ide2-cwd=")) {
+      cwd = arg.slice("--ide2-cwd=".length);
+    } else if (arg.startsWith("--ide2-target=")) {
+      target = arg.slice("--ide2-target=".length);
+    } else if (arg.startsWith("--ide2-ssh=")) {
+      sshTarget = arg.slice("--ide2-ssh=".length);
+    } else if (arg.startsWith("--ide2-ssh-opt=")) {
+      sshOptions = arg.slice("--ide2-ssh-opt=".length);
+    } else if (arg === "--ide2-bootstrap=1") {
+      autoBootstrap = true;
+    } else if (arg === "--ide2-diff=1") {
+      diff = true;
+    } else if (arg.startsWith("--ide2-base=")) {
+      base = arg.slice("--ide2-base=".length);
+    } else if (arg.startsWith("--ide2-worktree=")) {
+      worktree = arg.slice("--ide2-worktree=".length);
+    }
+  }
+
+  const resolvedTarget = target ? resolve(cwd, target) : cwd;
+  return {
+    cwd,
+    target: resolvedTarget,
+    sshTarget,
+    sshOptions,
+    autoBootstrap,
+    diff,
+    base,
+    worktree,
+  };
+}
+
+/**
+ * Wraps a `WorkspaceBackend` (`LocalWorkspaceBackend` or `SshWorkspaceBackend`)
+ * together with its bound Electron `BrowserWindow`s and (when connected via SSH)
+ * the laptop-local `clientPluginHost` (`"host": "client"` plugins).
+ */
+interface ManagedSession {
+  key: string;
+  backend: WorkspaceBackend;
+  /** Non-null on remote SSH sessions so `"host": "client"` plugins run locally on your laptop! */
+  clientPluginHost: PluginHost | null;
+  /** Latest remote-side `"workspace"` plugin state when `backend.isRemote === true` */
+  remotePluginSnapshot: {
+    plugins: InstalledPluginInfo[];
+    decorations: PluginLineDecoration[];
+    cards: PluginAgentCardState[];
+  };
+  windows: Set<BrowserWindow>;
+  unsubBackend?: () => void;
+}
+
+const sessionsByKey = new Map<string, ManagedSession>();
+const sessionByWindowId = new Map<
+  number,
+  { managed: ManagedSession; launchContext: LaunchContext }
+>();
+const recentProjects = new RecentProjectsStore();
+const preferences = new PreferencesStore();
+let openProjectDialogInFlight = false;
+
+const intel = new IntelClient({
+  workerPath: resolve(DIST_ROOT, "main/worker.cjs"),
+});
+
+function broadcastToSession(managed: ManagedSession, event: WorkspaceEvent): void {
+  for (const win of managed.windows) {
+    if (!win.isDestroyed()) {
+      win.webContents.send("ide2:event", event);
+    }
+  }
+}
+
+async function getMergedPluginsForSession(managed: ManagedSession): Promise<{
+  plugins: InstalledPluginInfo[];
+  decorations: PluginLineDecoration[];
+  cards: PluginAgentCardState[];
+}> {
+  if (!managed.backend.isRemote || !managed.clientPluginHost) {
+    const plugins = await managed.backend.listPlugins();
+    const localController = (managed.backend as LocalWorkspaceBackend).getPluginController?.();
+    return {
+      plugins,
+      decorations: localController?.getDecorations() ?? [],
+      cards: localController?.getCards() ?? [],
+    };
+  }
+
+  const localPlugins = await managed.clientPluginHost.listPlugins();
+  const remotePlugins = managed.remotePluginSnapshot.plugins;
+  return {
+    plugins: [...localPlugins, ...remotePlugins],
+    decorations: [
+      ...managed.clientPluginHost.getDecorations(),
+      ...managed.remotePluginSnapshot.decorations,
+    ],
+    cards: [
+      ...managed.clientPluginHost.getCards(),
+      ...managed.remotePluginSnapshot.cards,
+    ],
+  };
+}
+
+function broadcastMergedPluginState(managed: ManagedSession): void {
+  if (!managed.backend.isRemote || !managed.clientPluginHost) return;
+  void managed.clientPluginHost.listPlugins().then((localPlugins) => {
+    broadcastToSession(managed, {
+      type: "plugins-updated",
+      plugins: [...localPlugins, ...managed.remotePluginSnapshot.plugins],
+      decorations: [
+        ...managed.clientPluginHost!.getDecorations(),
+        ...managed.remotePluginSnapshot.decorations,
+      ],
+      cards: [
+        ...managed.clientPluginHost!.getCards(),
+        ...managed.remotePluginSnapshot.cards,
+      ],
+    });
+  });
+}
+
 function registerRendererProtocol(): void {
   const canonRendererRoot = realpathSync(RENDERER_ROOT);
-  protocol.handle("ide2", (request) => {
+  const localInstaller = new PluginInstaller(
+    process.env.IDE2_HOME ?? join(homedir(), ".expect2-ide"),
+    "local",
+  );
+
+  protocol.handle("ide2", async (request) => {
     try {
       const url = new URL(request.url);
       let reqPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
       if (!reqPath) reqPath = "index.html";
+
+      // Dynamic Plugin ESM & Runtime Shim serving (`ide2://app/__plugins/...`)
+      if (reqPath.startsWith("__plugins/")) {
+        const subParts = reqPath.slice("__plugins/".length).split("/");
+        if (subParts[0] === "_shim" && subParts[1]) {
+          const shimSource = PLUGIN_SHIM_MODULES[subParts[1]];
+          if (shimSource) {
+            return new Response(shimSource, {
+              status: 200,
+              headers: { "Content-Type": "text/javascript; charset=utf-8" },
+            });
+          }
+          return new Response("Shim Not Found", { status: 404 });
+        }
+
+        const scope = subParts[0]; // "local" | "remote"
+        const pluginId = subParts[1];
+        if (!pluginId) {
+          return new Response("Not Found", { status: 404 });
+        }
+
+        if (scope === "local") {
+          const bundleFile = join(localInstaller.getPluginDir(pluginId), ".ide2-build/client.js");
+          if (existsSync(bundleFile)) {
+            return new Response(readFileSync(bundleFile), {
+              status: 200,
+              headers: {
+                "Content-Type": "text/javascript; charset=utf-8",
+                "Cache-Control": "no-store",
+              },
+            });
+          }
+          return new Response("Local plugin client bundle not found", { status: 404 });
+        }
+
+        if (scope === "remote") {
+          const sessionKey = url.searchParams.get("session") ?? "";
+          const candidate =
+            (sessionKey ? sessionsByKey.get(sessionKey) : undefined) ??
+            Array.from(sessionsByKey.values()).find((s) => s.backend.isRemote);
+          if (!candidate) {
+            return new Response("No active remote session", { status: 404 });
+          }
+          const code = await candidate.backend.readPluginClientBundle(pluginId);
+          if (code !== null) {
+            return new Response(code, {
+              status: 200,
+              headers: {
+                "Content-Type": "text/javascript; charset=utf-8",
+                "Cache-Control": "no-store",
+              },
+            });
+          }
+          return new Response("Remote plugin client bundle not found", { status: 404 });
+        }
+      }
+
       const candidate = resolve(canonRendererRoot, reqPath);
       const canonTarget = realpathSync(candidate);
       const rel = relative(canonRendererRoot, canonTarget);
@@ -95,55 +313,6 @@ function registerRendererProtocol(): void {
   });
 }
 
-interface ParsedProcessFlags {
-  cwd: string;
-  target: string;
-  diff: boolean;
-  base?: string;
-  worktree?: string;
-}
-
-function parseFlags(argv: readonly string[], fallbackCwd: string): ParsedProcessFlags {
-  let cwd = fallbackCwd;
-  let target: string | undefined;
-  let diff = false;
-  let base: string | undefined;
-  let worktree: string | undefined;
-
-  for (const arg of argv) {
-    if (arg.startsWith("--ide2-cwd=")) {
-      cwd = arg.slice("--ide2-cwd=".length);
-    } else if (arg.startsWith("--ide2-target=")) {
-      target = arg.slice("--ide2-target=".length);
-    } else if (arg === "--ide2-diff=1") {
-      diff = true;
-    } else if (arg.startsWith("--ide2-base=")) {
-      base = arg.slice("--ide2-base=".length);
-    } else if (arg.startsWith("--ide2-worktree=")) {
-      worktree = arg.slice("--ide2-worktree=".length);
-    }
-  }
-
-  const resolvedTarget = target ? resolve(cwd, target) : cwd;
-  return { cwd, target: resolvedTarget, diff, base, worktree };
-}
-
-interface RepoSession {
-  context: LaunchContext;
-  git: WorktreeService;
-  annotations: AnnotationStore;
-  watcher: MultiWorktreeWatcher;
-  windows: Set<BrowserWindow>;
-  analysisCache: Map<string, { tokens: TokenSpan[][]; symbols: CodeSymbol[] }>;
-  gitStatusCache: Map<string, Map<string, FileGitStatus>>;
-}
-
-const sessionsByCommonDir = new Map<string, RepoSession>();
-const sessionByWindowId = new Map<number, { session: RepoSession; launchContext: LaunchContext }>();
-const recentProjects = new RecentProjectsStore();
-const preferences = new PreferencesStore();
-let openProjectDialogInFlight = false;
-
 const tourServer = new TourServer({
   ensureRepoWindow: async ({ cwd, worktree, diff, focusWindow }) => {
     const flags: ParsedProcessFlags = {
@@ -152,187 +321,253 @@ const tourServer = new TourServer({
       diff: Boolean(diff),
       worktree,
     };
-    const { session, launchContext } = await getOrCreateRepoSession(flags);
-    // Avoid hijacking worktree/window focus if another worktree in the same repo is already mid-review
+    const { managed, launchContext } = await getOrCreateManagedSession(flags);
     const otherWtAwaiting = tourServer
-      .getReviewStates(session.context.repoCommonDir)
+      .getReviewStates(managed.backend.getLaunchContext().repoCommonDir)
       .some((r) => r.awaitingUser && r.worktreePath !== launchContext.initialWorktreePath);
     const shouldFocus = focusWindow && !otherWtAwaiting;
     const opened = await openIdeWindow(flags, undefined, {
       focusOnReuse: shouldFocus,
       suppressCliOpenEvent: !diff || otherWtAwaiting,
     });
-    const cachedWts = session.git.listCachedWorktrees();
+    const cachedWts = managed.backend.listCachedWorktrees();
     const worktrees =
-      cachedWts.length > 0
-        ? cachedWts
-        : await session.git.discoverWorktrees(launchContext.initialWorktreePath);
+      cachedWts.length > 0 ? cachedWts : await managed.backend.discoverWorktrees();
     if (shouldFocus && !opened.win.isDestroyed()) {
       opened.win.show();
       opened.win.focus();
     }
     return {
-      repoCommonDir: session.context.repoCommonDir,
-      repoName: session.context.repoName,
+      repoCommonDir: managed.backend.getLaunchContext().repoCommonDir,
+      repoName: managed.backend.getLaunchContext().repoName,
       worktreePath: launchContext.initialWorktreePath,
       worktrees,
     };
   },
   broadcastWalkthrough: (repoCommonDir, walkthroughs) => {
-    const session = sessionsByCommonDir.get(repoCommonDir);
-    if (session) {
-      broadcastToSession(session, {
+    const managed = sessionsByKey.get(repoCommonDir);
+    if (managed) {
+      broadcastToSession(managed, {
         type: "walkthrough-updated",
         walkthroughs,
       });
     }
   },
   broadcastReview: (repoCommonDir, reviews) => {
-    const session = sessionsByCommonDir.get(repoCommonDir);
-    if (session) {
-      broadcastToSession(session, {
+    const managed = sessionsByKey.get(repoCommonDir);
+    if (managed) {
+      broadcastToSession(managed, {
         type: "review-updated",
         reviews,
       });
     }
   },
-});
-
-const intel = new IntelClient({
-  workerPath: resolve(DIST_ROOT, "main/worker.cjs"),
-});
-
-function broadcastToSession(session: RepoSession, event: WorkspaceEvent): void {
-  for (const win of session.windows) {
-    if (!win.isDestroyed()) {
-      win.webContents.send("ide2:event", event);
+  handlePluginCli: async (params) => {
+    const flags: ParsedProcessFlags = {
+      cwd: params.cwd,
+      target: params.cwd,
+      diff: false,
+      worktree: params.worktree,
+    };
+    const { managed, launchContext } = await getOrCreateManagedSession(flags);
+    await openIdeWindow(flags, undefined, {
+      focusOnReuse: Boolean(params.wait),
+      suppressCliOpenEvent: true,
+    });
+    const localBackend = managed.backend as LocalWorkspaceBackend;
+    const controller = localBackend.getPluginController?.();
+    if (!controller) {
+      throw new Error("No plugin runtime active on this workspace.");
     }
-  }
-}
+    return controller.handleAgentCli({
+      worktreePath: launchContext.initialWorktreePath,
+      subcommand: params.subcommand,
+      argv: params.argv,
+      stdin: params.stdin,
+      wait: params.wait,
+      waitTimeoutMs: params.waitTimeoutMs,
+    });
+  },
+});
 
-async function getOrCreateRepoSession(flags: ParsedProcessFlags): Promise<{
-  session: RepoSession;
+async function getOrCreateManagedSession(
+  flags: ParsedProcessFlags,
+  opts?: { deferSshBootstrap?: boolean },
+): Promise<{
+  managed: ManagedSession;
   launchContext: LaunchContext;
 }> {
-  const baseCtx = await resolveRepoContext(flags.target);
-  const existing = sessionsByCommonDir.get(baseCtx.repoCommonDir);
-
-  const selectInitialWorktree = (
-    wts: readonly { path: string; name: string; branch: string }[],
-  ): string => {
-    if (flags.worktree) {
-      const q = flags.worktree.trim();
-      const resolvedQ = resolve(flags.cwd, q);
-      let canonQ = resolvedQ;
-      try {
-        canonQ = realpathSync(resolvedQ);
-      } catch {
-        // ignore non-path names
-      }
-      const matched = wts.find(
-        (w) =>
-          w.name === q ||
-          w.branch === q ||
-          w.path === q ||
-          w.path === resolvedQ ||
-          w.path === canonQ,
-      );
-      if (matched) return matched.path;
+  if (flags.sshTarget) {
+    const parsedSsh = parseSshTarget(flags.sshTarget);
+    const key = parsedSsh.uri;
+    const existing = sessionsByKey.get(key);
+    if (existing) {
+      const wtPath = await existing.backend
+        .selectWorktreePath(flags.worktree)
+        .catch(() => existing.backend.getLaunchContext().initialWorktreePath);
+      return {
+        managed: existing,
+        launchContext: {
+          ...existing.backend.getLaunchContext(),
+          initialWorktreePath: wtPath,
+          initialLine: parsedSsh.line,
+          initialColumn: parsedSsh.column,
+          initialDiffMode: flags.diff,
+          initialBaseRef: flags.base,
+        },
+      };
     }
-    return baseCtx.initialWorktreePath;
-  };
 
-  if (existing) {
-    const wts =
-      existing.git.listCachedWorktrees().length > 0
-        ? existing.git.listCachedWorktrees()
-        : await existing.git.discoverWorktrees(baseCtx.initialWorktreePath);
-    const initialWorktreePath = selectInitialWorktree(wts);
+    const sshBackend = await SshWorkspaceBackend.create({
+      appRoot: APP_ROOT,
+      sshTarget: flags.sshTarget,
+      sshOptions: flags.sshOptions,
+      worktree: flags.worktree,
+      diff: flags.diff,
+      base: flags.base,
+      autoBootstrap: flags.autoBootstrap,
+      deferOnBootstrapNeeded: opts?.deferSshBootstrap,
+      localIntel: intel,
+    });
+
+    const initialSnap = await sshBackend.getBootstrapSnapshot().catch(() => null);
+
+    const managed: ManagedSession = {
+      key,
+      backend: sshBackend,
+      clientPluginHost: null,
+      remotePluginSnapshot: {
+        plugins: initialSnap?.plugins ?? [],
+        decorations: initialSnap?.pluginDecorations ?? [],
+        cards: initialSnap?.pluginCards ?? [],
+      },
+      windows: new Set(),
+    };
+
+    const clientHost = new PluginHost({
+      backend: sshBackend,
+      scope: "local",
+      hostAffinityFilter: "client",
+      runnerWorkerPath: resolve(DIST_ROOT, "main/plugin-runner.cjs"),
+      builtinPluginDirs: existsSync(BUILTIN_PR_PLUGIN_DIR) ? [BUILTIN_PR_PLUGIN_DIR] : [],
+      onStateChanged: () => {
+        broadcastMergedPluginState(managed);
+      },
+      onPluginEvent: (pluginId, event, payload) => {
+        broadcastToSession(managed, {
+          type: "plugin-event",
+          pluginId,
+          event,
+          payload,
+        });
+      },
+    });
+    managed.clientPluginHost = clientHost;
+
+    if (!sshBackend.getConnectionState().needsBootstrap) {
+      await clientHost.start();
+    }
+
+    managed.unsubBackend = sshBackend.onEvent((evt) => {
+      if (evt.type === "plugins-updated") {
+        managed.remotePluginSnapshot = {
+          plugins: evt.plugins,
+          decorations: evt.decorations,
+          cards: evt.cards,
+        };
+        broadcastMergedPluginState(managed);
+        return;
+      }
+      broadcastToSession(managed, evt);
+    });
+
+    sessionsByKey.set(key, managed);
     return {
-      session: existing,
+      managed,
+      launchContext: sshBackend.getLaunchContext(),
+    };
+  }
+
+  // Local repository session
+  const tempBackend = await LocalWorkspaceBackend.create({
+    targetPath: flags.target,
+    cwd: flags.cwd,
+    worktree: flags.worktree,
+    diff: flags.diff,
+    base: flags.base,
+    intel,
+    tourServer,
+  });
+
+  const repoCommonDir = tempBackend.getLaunchContext().repoCommonDir;
+  const existing = sessionsByKey.get(repoCommonDir);
+  if (existing) {
+    const newLaunchCtx = tempBackend.getLaunchContext();
+    await tempBackend.dispose();
+    const wtPath = await existing.backend.selectWorktreePath(flags.worktree, flags.cwd);
+    return {
+      managed: existing,
       launchContext: {
-        ...baseCtx,
-        initialWorktreePath,
+        ...existing.backend.getLaunchContext(),
+        initialWorktreePath: wtPath,
+        initialFilePath: newLaunchCtx.initialFilePath,
+        initialLine: newLaunchCtx.initialLine,
+        initialColumn: newLaunchCtx.initialColumn,
         initialDiffMode: flags.diff,
         initialBaseRef: flags.base,
       },
     };
   }
 
-  const git = new WorktreeService(baseCtx.repoCommonDir);
-  const worktrees = await git.discoverWorktrees(baseCtx.initialWorktreePath);
-  const initialWorktreePath = selectInitialWorktree(worktrees);
-  const annotations = new AnnotationStore(baseCtx.repoCommonDir);
-
-  const launchContext: LaunchContext = {
-    ...baseCtx,
-    initialWorktreePath,
-    initialDiffMode: flags.diff,
-    initialBaseRef: flags.base,
-  };
-
-  let sessionRef: RepoSession;
-  const watcher = new MultiWorktreeWatcher(
-    worktrees,
-    baseCtx.repoCommonDir,
-    async ({ worktreePath, changedFiles }) => {
-      if (!sessionRef) return;
-      sessionRef.gitStatusCache.delete(worktreePath);
-      intel.invalidateWorktree(worktreePath, changedFiles);
-      const updatedWorktrees = await git.discoverWorktrees(baseCtx.initialWorktreePath);
-
-      // Reconcile annotations for any changed files so line numbers stay accurate live
-      let reconciledAny = false;
-      for (const relFile of changedFiles.slice(0, 25)) {
-        try {
-          const doc = await git.readFile(worktreePath, relFile);
-          if (!doc.isBinary) {
-            await annotations.reconcileFile(worktreePath, relFile, doc.lines, doc.contentHash);
-            reconciledAny = true;
-          }
-        } catch {
-          // File may have been deleted or ignored
-        }
-      }
-
-      broadcastToSession(sessionRef, {
-        type: "worktrees-updated",
-        worktrees: updatedWorktrees,
-        changedWorktreePath: worktreePath,
-        changedFiles,
-      });
-
-      if (reconciledAny) {
-        const list = await annotations.list();
-        broadcastToSession(sessionRef, {
-          type: "annotations-updated",
-          worktreePath,
-          annotations: list,
-        });
-      }
-    },
-    {
-      onActivity: (worktreePath, timestamp) => {
-        git.touchActivity(worktreePath, timestamp);
-      },
-    },
-  );
-
-  sessionRef = {
-    context: launchContext,
-    git,
-    annotations,
-    watcher,
+  const managed: ManagedSession = {
+    key: repoCommonDir,
+    backend: tempBackend,
+    clientPluginHost: null,
+    remotePluginSnapshot: { plugins: [], decorations: [], cards: [] },
     windows: new Set(),
-    analysisCache: new Map(),
-    gitStatusCache: new Map(),
   };
 
-  sessionsByCommonDir.set(baseCtx.repoCommonDir, sessionRef);
-  return { session: sessionRef, launchContext };
+  const pluginHost = new PluginHost({
+    backend: tempBackend,
+    scope: "local",
+    hostAffinityFilter: "all",
+    runnerWorkerPath: resolve(DIST_ROOT, "main/plugin-runner.cjs"),
+    builtinPluginDirs: existsSync(BUILTIN_PR_PLUGIN_DIR) ? [BUILTIN_PR_PLUGIN_DIR] : [],
+    onStateChanged: (snapshot) => {
+      broadcastToSession(managed, {
+        type: "plugins-updated",
+        plugins: snapshot.plugins,
+        decorations: snapshot.decorations,
+        cards: snapshot.cards,
+      });
+    },
+    onPluginEvent: (pluginId, event, payload) => {
+      broadcastToSession(managed, {
+        type: "plugin-event",
+        pluginId,
+        event,
+        payload,
+      });
+    },
+  });
+  tempBackend.attachPluginController(pluginHost);
+  await pluginHost.start();
+
+  managed.unsubBackend = tempBackend.onEvent((evt) => {
+    broadcastToSession(managed, evt);
+  });
+
+  sessionsByKey.set(repoCommonDir, managed);
+  return {
+    managed,
+    launchContext: tempBackend.getLaunchContext(),
+  };
 }
 
-function getWindowSession(sender: WebContents): { session: RepoSession; launchContext: LaunchContext } {
+function getWindowSession(sender: WebContents): {
+  managed: ManagedSession;
+  launchContext: LaunchContext;
+} {
   const win = BrowserWindow.fromWebContents(sender);
   if (!win) {
     throw new Error("Request did not originate from an active ide2 window.");
@@ -351,7 +586,6 @@ function installNativeShortcutRouter(win: BrowserWindow): void {
     const mod = isMac ? input.meta : input.control;
     const key = input.key.toLowerCase();
 
-    // Never allow Cmd/Ctrl+W or Cmd/Ctrl+R or Cmd/Ctrl+N to trigger Chromium browser defaults!
     if (mod && !input.alt && !input.shift && key === "w") {
       event.preventDefault();
       win.webContents.send("ide2:event", {
@@ -362,7 +596,6 @@ function installNativeShortcutRouter(win: BrowserWindow): void {
     }
 
     if (mod && (key === "r" || key === "p" || key === "n")) {
-      // Prevent accidental Chromium reload, print dialog, or new window; forward Cmd+Shift+P to Markdown toggle
       if (input.shift && key === "p") {
         event.preventDefault();
         win.webContents.send("ide2:event", {
@@ -376,37 +609,45 @@ function installNativeShortcutRouter(win: BrowserWindow): void {
   });
 }
 
-function assertRegisteredWorktree(session: RepoSession, worktreePath: string): string {
-  let canon = worktreePath;
-  try {
-    canon = realpathSync(worktreePath);
-  } catch {
-    // will fail membership check below
-  }
-  const known = session.git.listCachedWorktrees().some((w) => w.path === canon);
-  if (!known) {
-    throw new Error(`Refused access to unregistered worktree path: ${worktreePath}`);
-  }
-  return canon;
-}
-
 function buildAppMenu(): void {
   const isMac = process.platform === "darwin";
   const recent = recentProjects.list();
   const recentSubmenu: Electron.MenuItemConstructorOptions[] =
     recent.length > 0
       ? recent.map((proj) => ({
-          label: proj.name,
-          sublabel: proj.path,
+          label: proj.isRemote ? `${proj.name} (SSH)` : proj.name,
+          sublabel: proj.sshTarget ?? proj.path,
           click: () => {
-            void openProjectInNewWindow(
-              BrowserWindow.getFocusedWindow() ?? undefined,
-              proj.path,
-              true,
-            );
+            if (proj.isRemote && proj.sshTarget) {
+              void openIdeWindow(
+                {
+                  cwd: process.cwd(),
+                  target: process.cwd(),
+                  sshTarget: proj.sshTarget,
+                  diff: false,
+                },
+                BrowserWindow.getFocusedWindow() ?? undefined,
+              );
+            } else {
+              void openProjectInNewWindow(
+                BrowserWindow.getFocusedWindow() ?? undefined,
+                proj.path,
+                true,
+              );
+            }
           },
         }))
       : [{ label: "No Recent Projects", enabled: false }];
+
+  const sendShortcutActionToFocused = (action: string) => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (win && !win.isDestroyed()) {
+      win.webContents.send("ide2:event", {
+        type: "native-shortcut",
+        action,
+      } satisfies WorkspaceEvent);
+    }
+  };
 
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac
@@ -415,6 +656,11 @@ function buildAppMenu(): void {
             label: "ide2",
             submenu: [
               { role: "about", label: "About ide2" },
+              { type: "separator" },
+              {
+                label: "Manage Plugins…",
+                click: () => sendShortcutActionToFocused("manage-plugins"),
+              },
               { type: "separator" },
               { role: "hide", label: "Hide ide2" },
               { role: "hideOthers" },
@@ -463,15 +709,26 @@ function buildAppMenu(): void {
           },
         },
         {
+          label: "Connect to Remote via SSH…",
+          click: () => sendShortcutActionToFocused("connect-ssh"),
+        },
+        {
+          label: "Manage Plugins…",
+          click: () => sendShortcutActionToFocused("manage-plugins"),
+        },
+        {
           label: "Recent Projects",
           submenu: recentSubmenu,
         },
+        { type: "separator" },
         {
           label: "Copy Walkthrough Prompt for Agent",
           click: () => {
             const win = BrowserWindow.getFocusedWindow();
             const bound = win ? sessionByWindowId.get(win.id) : undefined;
-            clipboard.writeText(buildWalkthroughAgentPrompt(bound?.session.context.repoName));
+            clipboard.writeText(
+              buildWalkthroughAgentPrompt(bound?.managed.backend.getLaunchContext().repoName),
+            );
           },
         },
         {
@@ -479,20 +736,14 @@ function buildAppMenu(): void {
           click: () => {
             const win = BrowserWindow.getFocusedWindow();
             const bound = win ? sessionByWindowId.get(win.id) : undefined;
-            clipboard.writeText(buildReviewAgentPrompt(bound?.session.context.repoName));
+            clipboard.writeText(
+              buildReviewAgentPrompt(bound?.managed.backend.getLaunchContext().repoName),
+            );
           },
         },
         {
           label: "Show Onboarding Walkthrough",
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            if (win && !win.isDestroyed()) {
-              win.webContents.send("ide2:event", {
-                type: "native-shortcut",
-                action: "show-onboarding",
-              } satisfies WorkspaceEvent);
-            }
-          },
+          click: () => sendShortcutActionToFocused("show-onboarding"),
         },
         { type: "separator" },
         { role: "minimize" },
@@ -517,6 +768,34 @@ async function openProjectInNewWindow(
 ): Promise<OpenProjectResult> {
   let targetPath = explicitPath?.trim();
 
+  if (targetPath?.startsWith("ssh://")) {
+    try {
+      const opened = await openIdeWindow(
+        {
+          cwd: process.cwd(),
+          target: process.cwd(),
+          sshTarget: targetPath,
+          diff: false,
+        },
+        parentWin,
+      );
+      return { opened: true, reused: opened.reused, repoName: opened.repoName };
+    } catch (err) {
+      if (err instanceof RemoteBootstrapRequiredError) {
+        return {
+          opened: false,
+          needsBootstrap: true,
+          sshTarget: err.sshTarget,
+          error: err.message,
+        };
+      }
+      return {
+        opened: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   if (!targetPath) {
     if (openProjectDialogInFlight) {
       return { opened: false, canceled: true };
@@ -528,9 +807,10 @@ async function openProjectInNewWindow(
         buttonLabel: "Open Project",
         properties: ["openDirectory"],
       };
-      const result = parentWin && !parentWin.isDestroyed()
-        ? await dialog.showOpenDialog(parentWin, dialogOpts)
-        : await dialog.showOpenDialog(dialogOpts);
+      const result =
+        parentWin && !parentWin.isDestroyed()
+          ? await dialog.showOpenDialog(parentWin, dialogOpts)
+          : await dialog.showOpenDialog(dialogOpts);
       if (result.canceled || result.filePaths.length === 0) {
         return { opened: false, canceled: true };
       }
@@ -572,19 +852,34 @@ async function openProjectInNewWindow(
 async function openIdeWindow(
   flags: ParsedProcessFlags,
   cascadeFromWin?: BrowserWindow,
-  options?: { focusOnReuse?: boolean; suppressCliOpenEvent?: boolean },
+  options?: {
+    focusOnReuse?: boolean;
+    suppressCliOpenEvent?: boolean;
+    deferSshBootstrap?: boolean;
+  },
 ): Promise<{ win: BrowserWindow; reused: boolean; repoName: string }> {
-  const { session, launchContext } = await getOrCreateRepoSession(flags);
-
-  recentProjects.record({
-    path: launchContext.initialWorktreePath,
-    repoCommonDir: launchContext.repoCommonDir,
-    name: launchContext.repoName,
+  const { managed, launchContext } = await getOrCreateManagedSession(flags, {
+    deferSshBootstrap: options?.deferSshBootstrap,
   });
+
+  if (managed.backend.isRemote && launchContext.sshTarget) {
+    recentProjects.record({
+      path: managed.key,
+      repoCommonDir: managed.key,
+      name: `${launchContext.repoName} (${launchContext.sshHost ?? "SSH"})`,
+      isRemote: true,
+      sshTarget: launchContext.sshTarget,
+    });
+  } else {
+    recentProjects.record({
+      path: launchContext.initialWorktreePath,
+      repoCommonDir: launchContext.repoCommonDir,
+      name: launchContext.repoName,
+    });
+  }
   buildAppMenu();
 
-  // Warm-window reuse if this repository already has an open window!
-  const existingWin = Array.from(session.windows).find((w) => !w.isDestroyed());
+  const existingWin = Array.from(managed.windows).find((w) => !w.isDestroyed());
   if (existingWin) {
     if (options?.focusOnReuse !== false) {
       if (existingWin.isMinimized()) existingWin.restore();
@@ -614,6 +909,11 @@ async function openIdeWindow(
       })()
     : {};
 
+  const titleSuffix =
+    managed.backend.isRemote && launchContext.sshHost
+      ? `${launchContext.repoName} [SSH: ${launchContext.sshHost}]`
+      : launchContext.repoName;
+
   const win = new BrowserWindow({
     ...cascadePos,
     width: 1480,
@@ -623,7 +923,7 @@ async function openIdeWindow(
     backgroundColor: "#181a1f",
     darkTheme: true,
     autoHideMenuBar: process.platform !== "darwin",
-    title: `ide2 — ${launchContext.repoName}`,
+    title: `ide2 — ${titleSuffix}`,
     show: !process.env.IDE2_SMOKE_SCREENSHOT,
     paintWhenInitiallyHidden: true,
     webPreferences: {
@@ -635,14 +935,16 @@ async function openIdeWindow(
     },
   });
 
-  session.windows.add(win);
-  sessionByWindowId.set(win.id, { session, launchContext });
+  managed.windows.add(win);
+  sessionByWindowId.set(win.id, { managed, launchContext });
   installNativeShortcutRouter(win);
 
   if (process.env.IDE2_SMOKE_SCREENSHOT) {
     win.webContents.on("console-message", (details) => {
       if (details.level === "warning" || details.level === "error") {
-        process.stderr.write(`[renderer ${details.level}] ${details.message} (${details.sourceId}:${details.lineNumber})\n`);
+        process.stderr.write(
+          `[renderer ${details.level}] ${details.message} (${details.sourceId}:${details.lineNumber})\n`,
+        );
       }
     });
     win.webContents.on("did-fail-load", (_evt, code, desc, url) => {
@@ -651,12 +953,15 @@ async function openIdeWindow(
   }
 
   win.on("closed", () => {
-    session.windows.delete(win);
+    managed.windows.delete(win);
     sessionByWindowId.delete(win.id);
-    if (session.windows.size === 0) {
-      session.watcher.close();
-      sessionsByCommonDir.delete(session.context.repoCommonDir);
-      tourServer.closeRepo(session.context.repoCommonDir);
+    if (managed.windows.size === 0) {
+      sessionsByKey.delete(managed.key);
+      managed.unsubBackend?.();
+      void Promise.allSettled([
+        managed.clientPluginHost?.dispose(),
+        managed.backend.dispose(),
+      ]);
     }
   });
 
@@ -679,258 +984,154 @@ async function openIdeWindow(
 
 function registerIpcHandlers(): void {
   ipcMain.handle("ide2:getBootstrap", async (evt) => {
-    const { session, launchContext } = getWindowSession(evt.sender);
-    const cachedWts = session.git.listCachedWorktrees();
-    const [worktrees, annotations] = await Promise.all([
-      cachedWts.length > 0
-        ? Promise.resolve(cachedWts)
-        : session.git.discoverWorktrees(launchContext.initialWorktreePath),
-      session.annotations.list(),
-    ]);
-    const walkthroughs = tourServer.getWalkthroughStates(session.context.repoCommonDir);
-    const reviews = tourServer.getReviewStates(session.context.repoCommonDir);
+    const { managed, launchContext } = getWindowSession(evt.sender);
+    const snap = await managed.backend.getBootstrapSnapshot({
+      initialWorktreePath: launchContext.initialWorktreePath,
+      initialFilePath: launchContext.initialFilePath,
+      initialLine: launchContext.initialLine,
+      initialColumn: launchContext.initialColumn,
+      initialDiffMode: launchContext.initialDiffMode,
+      initialBaseRef: launchContext.initialBaseRef,
+    });
+
+    if (managed.backend.isRemote) {
+      managed.remotePluginSnapshot = {
+        plugins: snap.plugins,
+        decorations: snap.pluginDecorations,
+        cards: snap.pluginCards,
+      };
+    }
+
+    const merged = await getMergedPluginsForSession(managed);
+
     return {
-      context: launchContext,
-      worktrees,
-      annotations,
-      walkthroughs,
-      reviews,
+      context: snap.context,
+      worktrees: snap.worktrees,
+      annotations: snap.annotations,
+      walkthroughs: snap.walkthroughs,
+      reviews: snap.reviews,
+      connection: snap.connection,
+      plugins: merged.plugins,
+      pluginDecorations: merged.decorations,
+      pluginCards: merged.cards,
       showOnboarding:
         !process.env.IDE2_SMOKE_SCREENSHOT &&
         !preferences.isOnboardingCompleted() &&
-        walkthroughs.length === 0 &&
-        reviews.length === 0,
+        !snap.connection.needsBootstrap &&
+        snap.walkthroughs.length === 0 &&
+        snap.reviews.length === 0,
     };
   });
 
   ipcMain.handle("ide2:listFiles", async (evt, worktreePath: string) => {
-    const { session } = getWindowSession(evt.sender);
-    const safeWt = assertRegisteredWorktree(session, worktreePath);
-    const files = await session.git.listFiles(safeWt);
-    const statusMap = new Map(
-      files.filter((f) => f.gitStatus).map((f) => [f.path, f.gitStatus!]),
-    );
-    session.gitStatusCache.set(safeWt, statusMap);
-    return files;
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.listFiles(worktreePath);
   });
 
-  ipcMain.handle(
-    "ide2:fuzzyFindFiles",
-    async (
-      evt,
-      params: { worktreePath: string; query: string; allWorktrees?: boolean; limit?: number },
-    ) => {
-      const { session } = getWindowSession(evt.sender);
-      const wts = session.git.listCachedWorktrees();
-      const targetWts = params.allWorktrees
-        ? wts
-        : wts.filter((w) => w.path === params.worktreePath);
-      const worktreesMeta = await Promise.all(
-        targetWts.map(async (wt) => {
-          let gitStatuses = session.gitStatusCache.get(wt.path);
-          if (!gitStatuses) {
-            const files = await session.git.listFiles(wt.path);
-            gitStatuses = new Map(
-              files.filter((f) => f.gitStatus).map((f) => [f.path, f.gitStatus!]),
-            );
-            session.gitStatusCache.set(wt.path, gitStatuses);
-          }
-          return { path: wt.path, name: wt.name, gitStatuses };
-        }),
-      );
-      return intel.fuzzyFindFiles({
-        ...params,
-        worktrees: worktreesMeta,
-      });
-    },
-  );
+  ipcMain.handle("ide2:fuzzyFindFiles", async (evt, params) => {
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.fuzzyFindFiles(params);
+  });
 
   ipcMain.handle(
     "ide2:readFile",
     async (evt, worktreePath: string, filePath: string, diffScope?: DiffScope) => {
-      const { session } = getWindowSession(evt.sender);
-      const safeWt = assertRegisteredWorktree(session, worktreePath);
-      const doc = await session.git.readFile(safeWt, filePath, diffScope);
-      if (doc.isBinary) return doc;
-
-      const cacheKey = `${doc.language}:${doc.contentHash}`;
-      const cached = session.analysisCache.get(cacheKey);
-      if (cached) {
-        return { ...doc, tokens: cached.tokens };
-      }
-
-      // Stream background Shiki + Tree-sitter analysis without blocking raw file paint!
-      const rawContent = doc.lines.join("\n");
-      void intel
-        .analyzeFile(worktreePath, filePath, doc.contentHash, rawContent, doc.language)
-        .then((analyzed) => {
-          if (session.analysisCache.size > 150) {
-            const firstKey = session.analysisCache.keys().next().value;
-            if (firstKey) session.analysisCache.delete(firstKey);
-          }
-          session.analysisCache.set(cacheKey, {
-            tokens: analyzed.tokens,
-            symbols: analyzed.symbols,
-          });
-          broadcastToSession(session, {
-            type: "tokens-ready",
-            worktreePath,
-            filePath,
-            contentHash: doc.contentHash,
-            tokens: analyzed.tokens,
-            symbols: analyzed.symbols,
-          });
-        })
-        .catch(() => {
-          // Non-fatal highlight/AST error
-        });
-
-      return doc;
+      const { managed } = getWindowSession(evt.sender);
+      return managed.backend.readFile(worktreePath, filePath, diffScope);
     },
   );
 
   ipcMain.handle(
     "ide2:readAssetDataUrl",
     async (evt, worktreePath: string, relativeFromFile: string, rawHref: string) => {
-      const { session } = getWindowSession(evt.sender);
-      const safeWt = assertRegisteredWorktree(session, worktreePath);
-      return session.git.readAssetDataUrl(safeWt, relativeFromFile, rawHref);
+      const { managed } = getWindowSession(evt.sender);
+      return managed.backend.readAssetDataUrl(worktreePath, relativeFromFile, rawHref);
     },
   );
 
   ipcMain.handle(
     "ide2:getDiff",
     async (evt, worktreePath: string, filePath: string, scope: DiffScope) => {
-      const { session } = getWindowSession(evt.sender);
-      const safeWt = assertRegisteredWorktree(session, worktreePath);
-      const safeScope: DiffScope =
-        scope.kind === "worktree"
-          ? { kind: "worktree", otherWorktreePath: assertRegisteredWorktree(session, scope.otherWorktreePath) }
-          : scope;
-      return session.git.getDiff(safeWt, filePath, safeScope);
+      const { managed } = getWindowSession(evt.sender);
+      return managed.backend.getDiff(worktreePath, filePath, scope);
     },
   );
 
   ipcMain.handle(
     "ide2:listChangedFiles",
     async (evt, worktreePath: string, scope: DiffScope) => {
-      const { session } = getWindowSession(evt.sender);
-      const safeWt = assertRegisteredWorktree(session, worktreePath);
-      const safeScope: DiffScope =
-        scope.kind === "worktree"
-          ? { kind: "worktree", otherWorktreePath: assertRegisteredWorktree(session, scope.otherWorktreePath) }
-          : scope;
-      return session.git.listChangedFiles(safeWt, safeScope);
+      const { managed } = getWindowSession(evt.sender);
+      return managed.backend.listChangedFiles(worktreePath, scope);
     },
   );
 
   ipcMain.handle("ide2:listCommits", async (evt, worktreePath: string, limit?: number) => {
-    const { session } = getWindowSession(evt.sender);
-    const safeWt = assertRegisteredWorktree(session, worktreePath);
-    return session.git.listCommits(safeWt, limit);
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.listCommits(worktreePath, limit);
   });
 
   ipcMain.handle("ide2:getBlame", async (evt, worktreePath: string, filePath: string) => {
-    const { session } = getWindowSession(evt.sender);
-    const safeWt = assertRegisteredWorktree(session, worktreePath);
-    return session.git.getBlame(safeWt, filePath);
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.getBlame(worktreePath, filePath);
   });
 
   ipcMain.handle("ide2:getStructure", async (evt, worktreePath: string, filePath: string) => {
-    const { session } = getWindowSession(evt.sender);
-    const safeWt = assertRegisteredWorktree(session, worktreePath);
-    const doc = await session.git.readFile(safeWt, filePath);
-    if (doc.isBinary) return [];
-    const cacheKey = `${doc.language}:${doc.contentHash}`;
-    const cached = session.analysisCache.get(cacheKey);
-    if (cached) return cached.symbols;
-    return intel.getStructure(safeWt, filePath, doc.lines.join("\n"));
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.getStructure(worktreePath, filePath);
   });
 
-  ipcMain.handle(
-    "ide2:searchSymbols",
-    async (
-      evt,
-      params: { worktreePath: string; query: string; allWorktrees?: boolean; limit?: number },
-    ) => {
-      const { session } = getWindowSession(evt.sender);
-      const worktreePaths = session.git.listCachedWorktrees().map((w) => w.path);
-      return intel.searchSymbols({ ...params, worktreePaths });
-    },
-  );
+  ipcMain.handle("ide2:searchSymbols", async (evt, params) => {
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.searchSymbols(params);
+  });
 
-  ipcMain.handle(
-    "ide2:findDefinitionAndUsages",
-    async (
-      evt,
-      params: { worktreePath: string; filePath: string; symbolName: string; line: number },
-    ) => {
-      return intel.findDefinitionAndUsages(params);
-    },
-  );
+  ipcMain.handle("ide2:findDefinitionAndUsages", async (evt, params) => {
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.findDefinitionAndUsages(params);
+  });
 
   ipcMain.handle("ide2:findInPath", async (evt, query: FindInPathQuery) => {
-    const { session } = getWindowSession(evt.sender);
-    const wts = session.git.listCachedWorktrees().map((w) => ({ path: w.path, name: w.name }));
-    return intel.findInPath(query, wts);
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.findInPath(query);
   });
 
   ipcMain.handle("ide2:listAnnotations", async (evt, worktreePath?: string) => {
-    const { session } = getWindowSession(evt.sender);
-    return session.annotations.list(worktreePath);
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.listAnnotations(worktreePath);
   });
 
   ipcMain.handle("ide2:createAnnotation", async (evt, input: CreateAnnotationInput) => {
-    const { session } = getWindowSession(evt.sender);
-    const created = await session.annotations.create(input);
-    const all = await session.annotations.list();
-    broadcastToSession(session, {
-      type: "annotations-updated",
-      worktreePath: created.worktreePath,
-      annotations: all,
-    });
-    return created;
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.createAnnotation(input);
   });
 
   ipcMain.handle("ide2:updateAnnotation", async (evt, input: UpdateAnnotationInput) => {
-    const { session } = getWindowSession(evt.sender);
-    const updated = await session.annotations.update(input);
-    const all = await session.annotations.list();
-    broadcastToSession(session, {
-      type: "annotations-updated",
-      worktreePath: updated.worktreePath,
-      annotations: all,
-    });
-    return updated;
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.updateAnnotation(input);
   });
 
   ipcMain.handle("ide2:deleteAnnotation", async (evt, id: string) => {
-    const { session } = getWindowSession(evt.sender);
-    await session.annotations.delete(id);
-    const all = await session.annotations.list();
-    broadcastToSession(session, {
-      type: "annotations-updated",
-      worktreePath: session.context.initialWorktreePath,
-      annotations: all,
-    });
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.deleteAnnotation(id);
   });
 
   ipcMain.handle("ide2:compileFeedbackPrompt", async (evt, options: ExportPromptOptions) => {
-    const { session } = getWindowSession(evt.sender);
-    const safeWt = assertRegisteredWorktree(session, options.worktreePath);
-    const wts = await session.git.discoverWorktrees(session.context.initialWorktreePath);
-    const wt = wts.find((w) => w.path === safeWt) ?? wts[0];
-    if (!wt) {
-      return { markdown: "", count: 0 };
-    }
-    const res = await session.annotations.compilePrompt(wt, { ...options, worktreePath: safeWt });
-    if (options.resolveAfterExport && res.count > 0) {
-      const all = await session.annotations.list();
-      broadcastToSession(session, {
-        type: "annotations-updated",
-        worktreePath: wt.path,
-        annotations: all,
-      });
+    const { managed } = getWindowSession(evt.sender);
+    const res = await managed.backend.compileFeedbackPrompt(options);
+    if (managed.backend.isRemote && managed.clientPluginHost && res.count > 0 && res.markdown) {
+      const wts = managed.backend.listCachedWorktrees();
+      const wt = wts.find((w) => w.path === options.worktreePath) ?? wts[0];
+      if (wt) {
+        const anns = await managed.backend.listAnnotations(options.worktreePath).catch(() => []);
+        const enriched = await managed.clientPluginHost
+          .enrichFeedbackPrompt({
+            worktree: wt,
+            annotations: anns,
+            markdown: res.markdown,
+          })
+          .catch(() => res.markdown);
+        return { markdown: enriched, count: res.count };
+      }
     }
     return res;
   });
@@ -946,56 +1147,139 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("ide2:revealInOs", (_evt, targetPath: string) => {
-    shell.showItemInFolder(targetPath);
+    if (!targetPath.startsWith("ssh://")) {
+      shell.showItemInFolder(targetPath);
+    }
   });
 
-  ipcMain.handle(
-    "ide2:createWorktree",
-    async (
-      evt,
-      params: { baseWorktreePath: string; branchName: string; baseRef?: string; targetDir?: string },
-    ) => {
-      const { session } = getWindowSession(evt.sender);
-      const safeBase = assertRegisteredWorktree(session, params.baseWorktreePath);
-      const created = await session.git.createWorktree({ ...params, baseWorktreePath: safeBase });
-      const updatedWorktrees = await session.git.discoverWorktrees(session.context.initialWorktreePath);
-      session.watcher.resetWatches(updatedWorktrees, session.context.repoCommonDir);
-      broadcastToSession(session, {
-        type: "worktrees-updated",
-        worktrees: updatedWorktrees,
-        changedWorktreePath: created.path,
-      });
-      return created;
-    },
-  );
+  ipcMain.handle("ide2:createWorktree", async (evt, params) => {
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.createWorktree(params);
+  });
 
   ipcMain.handle("ide2:openProjectWindow", async (evt, targetPath?: string) => {
     const senderWin = BrowserWindow.fromWebContents(evt.sender) ?? undefined;
     return openProjectInNewWindow(senderWin, targetPath, false);
   });
 
+  ipcMain.handle(
+    "ide2:connectSshWindow",
+    async (
+      evt,
+      params: {
+        sshTarget: string;
+        sshOptions?: string;
+        diff?: boolean;
+        worktree?: string;
+        autoBootstrap?: boolean;
+      },
+    ): Promise<OpenProjectResult> => {
+      const senderWin = BrowserWindow.fromWebContents(evt.sender) ?? undefined;
+      try {
+        const opened = await openIdeWindow(
+          {
+            cwd: process.cwd(),
+            target: process.cwd(),
+            sshTarget: params.sshTarget,
+            sshOptions: params.sshOptions,
+            autoBootstrap: params.autoBootstrap,
+            diff: Boolean(params.diff),
+            worktree: params.worktree,
+          },
+          senderWin,
+        );
+        return {
+          opened: true,
+          reused: opened.reused,
+          repoName: opened.repoName,
+          sshTarget: params.sshTarget,
+        };
+      } catch (err) {
+        if (err instanceof RemoteBootstrapRequiredError) {
+          return {
+            opened: false,
+            needsBootstrap: true,
+            sshTarget: err.sshTarget,
+            error: err.message,
+          };
+        }
+        return {
+          opened: false,
+          sshTarget: params.sshTarget,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+  );
+
+  ipcMain.handle("ide2:bootstrapRemoteSsh", async (evt) => {
+    const { managed } = getWindowSession(evt.sender);
+    if (!managed.backend.isRemote) {
+      return { ok: true };
+    }
+    const ssh = managed.backend as SshWorkspaceBackend;
+    try {
+      await ssh.bootstrapAndConnect();
+      if (managed.clientPluginHost) {
+        await managed.clientPluginHost.start();
+      }
+      const snap = await ssh.getBootstrapSnapshot();
+      managed.remotePluginSnapshot = {
+        plugins: snap.plugins,
+        decorations: snap.pluginDecorations,
+        cards: snap.pluginCards,
+      };
+      broadcastToSession(managed, {
+        type: "worktrees-updated",
+        worktrees: snap.worktrees,
+      });
+      broadcastMergedPluginState(managed);
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  ipcMain.handle("ide2:reconnectRemoteSsh", async (evt) => {
+    const { managed } = getWindowSession(evt.sender);
+    if (!managed.backend.isRemote) return { ok: true };
+    const ssh = managed.backend as SshWorkspaceBackend;
+    try {
+      await ssh.reconnectNow();
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
   ipcMain.handle("ide2:listRecentProjects", () => {
     return recentProjects.list();
   });
 
-  ipcMain.handle("ide2:respondWalkthrough", (evt, response: WalkthroughUserResponse) => {
-    const { session } = getWindowSession(evt.sender);
-    tourServer.respondFromUser(session.context.repoCommonDir, response);
+  ipcMain.handle("ide2:respondWalkthrough", async (evt, response: WalkthroughUserResponse) => {
+    const { managed } = getWindowSession(evt.sender);
+    await managed.backend.respondWalkthrough(response);
   });
 
-  ipcMain.handle("ide2:endWalkthrough", (evt, sessionId?: string) => {
-    const { session } = getWindowSession(evt.sender);
-    tourServer.endFromUser(session.context.repoCommonDir, sessionId);
+  ipcMain.handle("ide2:endWalkthrough", async (evt, sessionId?: string) => {
+    const { managed } = getWindowSession(evt.sender);
+    await managed.backend.endWalkthrough(sessionId);
   });
 
   ipcMain.handle("ide2:getWalkthroughAgentPrompt", (evt) => {
-    const { session } = getWindowSession(evt.sender);
-    return buildWalkthroughAgentPrompt(session.context.repoName);
+    const { managed } = getWindowSession(evt.sender);
+    return buildWalkthroughAgentPrompt(managed.backend.getLaunchContext().repoName);
   });
 
   ipcMain.handle("ide2:getReviewAgentPrompt", (evt) => {
-    const { session } = getWindowSession(evt.sender);
-    return buildReviewAgentPrompt(session.context.repoName);
+    const { managed } = getWindowSession(evt.sender);
+    return buildReviewAgentPrompt(managed.backend.getLaunchContext().repoName);
   });
 
   ipcMain.handle("ide2:completeOnboarding", () => {
@@ -1003,62 +1287,136 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("ide2:sendReviewResponse", async (evt, response: ReviewUserResponse) => {
-    const { session } = getWindowSession(evt.sender);
-    const safeWt = assertRegisteredWorktree(session, response.worktreePath);
-
-    if (response.action === "approve" || response.action === "cancel") {
-      const sent = tourServer.respondReviewFromUser(session.context.repoCommonDir, {
-        sessionId: response.sessionId,
-        worktreePath: safeWt,
-        action: response.action,
-        count: 0,
-      });
-      return { sent, count: 0 };
-    }
-
-    const wts = await session.git.discoverWorktrees(session.context.initialWorktreePath);
-    const wt = wts.find((w) => w.path === safeWt) ?? wts[0];
-    if (!wt) {
-      return { sent: false, count: 0 };
-    }
-
-    const reviewState = tourServer.getReviewState(
-      session.context.repoCommonDir,
-      safeWt,
-      response.sessionId,
-    );
-    if (!reviewState) {
-      return { sent: false, count: 0 };
-    }
-    const shouldResolve = response.resolveAfterSend ?? reviewState.resolveOnSend ?? true;
-
-    const compiled = await session.annotations.compilePrompt(wt, {
-      worktreePath: safeWt,
-      includeOutdated: response.includeOutdated,
-      resolveAfterExport: shouldResolve,
-    });
-    if (compiled.count === 0 || !compiled.markdown) {
-      return { sent: false, count: 0 };
-    }
-
-    if (shouldResolve) {
-      const all = await session.annotations.list();
-      broadcastToSession(session, {
-        type: "annotations-updated",
-        worktreePath: wt.path,
-        annotations: all,
-      });
-    }
-
-    const sent = tourServer.respondReviewFromUser(session.context.repoCommonDir, {
-      sessionId: response.sessionId ?? reviewState.sessionId,
-      worktreePath: safeWt,
-      action: "feedback",
-      markdown: compiled.markdown,
-      count: compiled.count,
-    });
-    return { sent, count: compiled.count };
+    const { managed } = getWindowSession(evt.sender);
+    return managed.backend.sendReviewResponse(response);
   });
+
+  /* ------------------------------------------------------------------------ */
+  /* Dual-Affinity Plugin Routing (Option C: Local `client` + Remote `workspace`) */
+  /* ------------------------------------------------------------------------ */
+
+  ipcMain.handle("ide2:listPlugins", async (evt) => {
+    const { managed } = getWindowSession(evt.sender);
+    const merged = await getMergedPluginsForSession(managed);
+    return merged.plugins;
+  });
+
+  ipcMain.handle(
+    "ide2:installPlugin",
+    async (evt, params: InstallPluginParams): Promise<InstallPluginResult> => {
+      const { managed } = getWindowSession(evt.sender);
+      if (managed.backend.isRemote && params.targetScope === "remote") {
+        return managed.backend.installPlugin(params);
+      }
+      if (managed.clientPluginHost) {
+        return managed.clientPluginHost.installPlugin(params);
+      }
+      return managed.backend.installPlugin(params);
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:setPluginEnabled",
+    async (
+      evt,
+      params: { pluginId: string; enabled: boolean; scope?: "local" | "remote" },
+    ): Promise<InstalledPluginInfo[]> => {
+      const { managed } = getWindowSession(evt.sender);
+      if (managed.backend.isRemote && params.scope === "remote") {
+        await managed.backend.setPluginEnabled(params);
+      } else if (managed.clientPluginHost) {
+        await managed.clientPluginHost.setPluginEnabled(params.pluginId, params.enabled);
+      } else {
+        await managed.backend.setPluginEnabled(params);
+      }
+      return (await getMergedPluginsForSession(managed)).plugins;
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:updatePlugin",
+    async (
+      evt,
+      params: { pluginId: string; scope?: "local" | "remote"; approvePermissions?: boolean },
+    ): Promise<UpdatePluginResult> => {
+      const { managed } = getWindowSession(evt.sender);
+      if (managed.backend.isRemote && params.scope === "remote") {
+        return managed.backend.updatePlugin(params);
+      }
+      if (managed.clientPluginHost) {
+        return managed.clientPluginHost.updatePlugin(
+          params.pluginId,
+          params.approvePermissions,
+        );
+      }
+      return managed.backend.updatePlugin(params);
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:removePlugin",
+    async (
+      evt,
+      params: { pluginId: string; scope?: "local" | "remote" },
+    ): Promise<InstalledPluginInfo[]> => {
+      const { managed } = getWindowSession(evt.sender);
+      if (managed.backend.isRemote && params.scope === "remote") {
+        await managed.backend.removePlugin(params);
+      } else if (managed.clientPluginHost) {
+        await managed.clientPluginHost.removePlugin(params.pluginId);
+      } else {
+        await managed.backend.removePlugin(params);
+      }
+      return (await getMergedPluginsForSession(managed)).plugins;
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:callPluginRpc",
+    async (
+      evt,
+      params: { pluginId: string; method: string; payload?: unknown; worktreePath?: string },
+    ) => {
+      const { managed } = getWindowSession(evt.sender);
+      if (managed.clientPluginHost?.hasPlugin(params.pluginId)) {
+        return managed.clientPluginHost.callPluginRpc(params);
+      }
+      return managed.backend.callPluginRpc(params);
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:triggerPluginAction",
+    async (
+      evt,
+      params: {
+        pluginId: string;
+        actionId: string;
+        worktreePath?: string;
+        filePath?: string;
+        line?: number;
+      },
+    ) => {
+      const { managed } = getWindowSession(evt.sender);
+      if (managed.clientPluginHost?.hasPlugin(params.pluginId)) {
+        await managed.clientPluginHost.triggerPluginAction(params);
+        return;
+      }
+      await managed.backend.triggerPluginAction(params);
+    },
+  );
+
+  ipcMain.handle(
+    "ide2:respondPluginCard",
+    async (evt, params: { sessionId: string; action: string; message?: string }) => {
+      const { managed } = getWindowSession(evt.sender);
+      if (managed.clientPluginHost) {
+        const handled = await managed.clientPluginHost.respondPluginCard(params);
+        if (handled) return;
+      }
+      await managed.backend.respondPluginCard(params);
+    },
+  );
 }
 
 app.setName("ide2");
@@ -1073,7 +1431,7 @@ if (!gotSingleInstanceLock) {
 } else {
   app.on("second-instance", (_event, commandLine, workingDirectory) => {
     const flags = parseFlags(commandLine, workingDirectory || process.cwd());
-    void openIdeWindow(flags);
+    void openIdeWindow(flags, undefined, { deferSshBootstrap: true });
   });
 
   app.whenReady().then(async () => {
@@ -1093,7 +1451,7 @@ if (!gotSingleInstanceLock) {
     }
     const initialFlags = parseFlags(process.argv, process.cwd());
     try {
-      await openIdeWindow(initialFlags);
+      await openIdeWindow(initialFlags, undefined, { deferSshBootstrap: true });
     } catch (err) {
       console.error("Failed to open repository in ide2:", err);
       app.quit();

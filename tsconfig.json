@@ -11,7 +11,11 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@expect2/ide2-plugin/server": ["./src/plugin-sdk/server.ts"],
+      "@expect2/ide2-plugin/client": ["./src/plugin-sdk/client.tsx"]
+    }
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*", "plugins/**/*", "tests/**/*"]
 }

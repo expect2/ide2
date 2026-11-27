@@ -11,9 +11,13 @@ import type {
   FileDocument,
   FileEntry,
   FindInPathQuery,
+  InstalledPluginInfo,
   LaunchContext,
   LineBlame,
+  PluginAgentCardState,
+  PluginLineDecoration,
   RecentProject,
+  RemoteConnectionState,
   ReviewSessionState,
   SearchMatch,
   WalkthroughState,
@@ -76,6 +80,17 @@ import { MarkdownViewer, type MarkdownViewMode } from "./views/MarkdownViewer.js
 import { ReviewSessionBar } from "./views/ReviewSessionBar.js";
 import { WalkthroughBar } from "./views/WalkthroughBar.js";
 import { WalkthroughCard } from "./views/WalkthroughCard.js";
+import {
+  matchesPluginFilePattern,
+  PluginAgentCardBanner,
+  PluginErrorBoundary,
+  useLoadedClientPlugins,
+} from "./plugins/runtime-host.js";
+import {
+  ConnectSshModal,
+  ManagePluginsModal,
+  RemoteBootstrapPromptView,
+} from "./views/SshAndPluginModals.js";
 
 interface WorktreeSessionState {
   tabs: EditorTab[];
@@ -99,8 +114,8 @@ interface RecentFileItem {
   openedAt: number;
 }
 
-type LeftToolId = "project" | "structure" | null;
-type BottomToolId = "git" | "usages" | null;
+type LeftToolId = "project" | "structure" | `plugin:${string}` | null;
+type BottomToolId = "git" | "usages" | `plugin:${string}` | null;
 
 function isMarkdownFile(filePath: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(filePath);
@@ -205,6 +220,20 @@ export const App: React.FC = () => {
   const [selectedReviewSessionId, setSelectedReviewSessionId] = useState<string>("");
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState<boolean>(false);
+  const [connectSshOpen, setConnectSshOpen] = useState<boolean>(false);
+  const [managePluginsOpen, setManagePluginsOpen] = useState<boolean>(false);
+  const [connection, setConnection] = useState<RemoteConnectionState>({
+    isRemote: false,
+    status: "local",
+  });
+  const [plugins, setPlugins] = useState<InstalledPluginInfo[]>([]);
+  const [pluginDecorations, setPluginDecorations] = useState<PluginLineDecoration[]>([]);
+  const [pluginCards, setPluginCards] = useState<PluginAgentCardState[]>([]);
+  const [rightPluginTool, setRightPluginTool] = useState<`plugin:${string}` | null>(null);
+  const [rawViewportTabIds, setRawViewportTabIds] = useState<Record<string, boolean>>({});
+  const pluginEventListenersRef = useRef<
+    Map<string, Set<(payload: unknown) => void>>
+  >(new Map());
   const [viewedStepId, setViewedStepId] = useState<string>("");
   const [folderFocusReq, setFolderFocusReq] = useState<{
     dirPath: string;
@@ -228,6 +257,78 @@ export const App: React.FC = () => {
   }, []);
 
   const platform: Platform = context?.platform ?? "darwin";
+
+  const loadedClientPlugins = useLoadedClientPlugins(
+    plugins,
+    context?.repoCommonDir ?? "",
+  );
+
+  const subscribePluginServerEvent = useCallback(
+    (pluginId: string, eventName: string, listener: (payload: unknown) => void) => {
+      const key = `${pluginId}::${eventName}`;
+      let set = pluginEventListenersRef.current.get(key);
+      if (!set) {
+        set = new Set();
+        pluginEventListenersRef.current.set(key, set);
+      }
+      set.add(listener);
+      return () => {
+        set?.delete(listener);
+      };
+    },
+    [],
+  );
+
+  const refreshPluginsList = useCallback(async () => {
+    const next = await window.ide2.listPlugins();
+    setPlugins(next);
+  }, []);
+
+  const enabledPluginToolWindows = useMemo(() => {
+    const out: Array<{
+      key: `plugin:${string}`;
+      pluginId: string;
+      pluginName: string;
+      twId: string;
+      title: string;
+      slot: "left" | "right" | "bottom";
+    }> = [];
+    for (const p of plugins) {
+      if (!p.enabled || p.error) continue;
+      for (const tw of p.manifest.contributes?.toolWindows ?? []) {
+        out.push({
+          key: `plugin:${p.id}:${tw.id}`,
+          pluginId: p.id,
+          pluginName: p.manifest.name,
+          twId: tw.id,
+          title: tw.title,
+          slot: tw.slot,
+        });
+      }
+    }
+    return out;
+  }, [plugins]);
+
+  const enabledPluginActions = useMemo(() => {
+    const out: Array<{
+      pluginId: string;
+      actionId: string;
+      title: string;
+      description?: string;
+    }> = [];
+    for (const p of plugins) {
+      if (!p.enabled || p.error) continue;
+      for (const act of p.manifest.contributes?.actions ?? []) {
+        out.push({
+          pluginId: p.id,
+          actionId: act.id,
+          title: act.title,
+          description: act.description,
+        });
+      }
+    }
+    return out;
+  }, [plugins]);
 
   const activeWorktree = useMemo(
     () => worktrees.find((w) => w.path === activeWorktreePath) ?? worktrees[0],
@@ -472,83 +573,97 @@ export const App: React.FC = () => {
     [openFileInWorktree],
   );
 
+  const hydrateFromBootstrap = useCallback(async () => {
+    const {
+      context: ctx,
+      worktrees: wts,
+      annotations: anns,
+      walkthroughs: initialWtTours,
+      reviews: initialReviews,
+      showOnboarding,
+      connection: conn,
+      plugins: initialPlugins,
+      pluginDecorations: initialDecs,
+      pluginCards: initialCards,
+    } = await window.ide2.getBootstrap();
+
+    setContext(ctx);
+    setConnection(conn);
+    setPlugins(initialPlugins);
+    setPluginDecorations(initialDecs);
+    setPluginCards(initialCards);
+    setWorktrees(wts);
+    setAnnotations(anns);
+    if (initialWtTours.length > 0) {
+      setWalkthroughs(initialWtTours);
+    }
+    if (initialReviews.length > 0) {
+      setReviews(initialReviews);
+    }
+    if (showOnboarding) {
+      setOnboardingOpen(true);
+    }
+
+    const initialWt =
+      wts.find((w) => w.path === ctx.initialWorktreePath)?.path ?? wts[0]?.path ?? "";
+    setActiveWorktreePath(initialWt);
+
+    if (initialWt) {
+      const defaultScope: DiffScope = {
+        kind: "branch",
+        baseRef: ctx.initialBaseRef,
+      };
+      const { files, changed } = await loadWorktreeResources(initialWt, defaultScope);
+
+      if (ctx.initialDiffMode) {
+        setBottomTool("git");
+      }
+
+      if (ctx.initialFilePath) {
+        await openFileInWorktree(initialWt, ctx.initialFilePath, {
+          line: ctx.initialLine,
+          column: ctx.initialColumn,
+          viewKind: ctx.initialDiffMode ? "diff" : "code",
+          diffScope: defaultScope,
+        });
+      } else if (ctx.initialDiffMode && changed[0]) {
+        await openFileInWorktree(initialWt, changed[0].path, {
+          viewKind: "diff",
+          diffScope: defaultScope,
+        });
+      } else {
+        const readme = files.find((f) => /^readme\.md$/i.test(f.path));
+        const firstTarget = readme?.path ?? changed[0]?.path ?? files[0]?.path;
+        if (firstTarget) {
+          await openFileInWorktree(initialWt, firstTarget, {
+            diffScope: defaultScope,
+          });
+        }
+      }
+
+      const initialWtTour =
+        initialWtTours.find((t) => t.worktreePath === initialWt) ?? initialWtTours[0];
+      if (initialWtTour && initialWtTour.steps.length > 0) {
+        setViewedStepId(initialWtTour.activeStepId);
+        const activeTourStep =
+          initialWtTour.steps.find((s) => s.id === initialWtTour.activeStepId) ??
+          initialWtTour.steps[initialWtTour.steps.length - 1];
+        if (activeTourStep) {
+          lastNavigatedStepBySessionRef.current[initialWtTour.sessionId] = activeTourStep.id;
+          applyWalkthroughStepNavigation(activeTourStep);
+        }
+      }
+    }
+  }, [applyWalkthroughStepNavigation, loadWorktreeResources, openFileInWorktree]);
+
   // Bootstrap IDE on mount
   useEffect(() => {
     let mounted = true;
-    window.ide2
-      .getBootstrap()
-      .then(async ({ context: ctx, worktrees: wts, annotations: anns, walkthroughs: initialWtTours, reviews: initialReviews, showOnboarding }) => {
-        if (!mounted) return;
-        setContext(ctx);
-        setWorktrees(wts);
-        setAnnotations(anns);
-        if (initialWtTours.length > 0) {
-          setWalkthroughs(initialWtTours);
-        }
-        if (initialReviews.length > 0) {
-          setReviews(initialReviews);
-        }
-        if (showOnboarding) {
-          setOnboardingOpen(true);
-        }
-
-        const initialWt =
-          wts.find((w) => w.path === ctx.initialWorktreePath)?.path ?? wts[0]?.path ?? "";
-        setActiveWorktreePath(initialWt);
-
-        if (initialWt) {
-          const defaultScope: DiffScope = {
-            kind: "branch",
-            baseRef: ctx.initialBaseRef,
-          };
-          const { files, changed } = await loadWorktreeResources(initialWt, defaultScope);
-
-          if (ctx.initialDiffMode) {
-            setBottomTool("git");
-          }
-
-          if (ctx.initialFilePath) {
-            await openFileInWorktree(initialWt, ctx.initialFilePath, {
-              line: ctx.initialLine,
-              column: ctx.initialColumn,
-              viewKind: ctx.initialDiffMode ? "diff" : "code",
-              diffScope: defaultScope,
-            });
-          } else if (ctx.initialDiffMode && changed[0]) {
-            await openFileInWorktree(initialWt, changed[0].path, {
-              viewKind: "diff",
-              diffScope: defaultScope,
-            });
-          } else {
-            const readme = files.find((f) => /^readme\.md$/i.test(f.path));
-            const firstTarget = readme?.path ?? changed[0]?.path ?? files[0]?.path;
-            if (firstTarget) {
-              await openFileInWorktree(initialWt, firstTarget, {
-                diffScope: defaultScope,
-              });
-            }
-          }
-
-          const initialWtTour =
-            initialWtTours.find((t) => t.worktreePath === initialWt) ?? initialWtTours[0];
-          if (initialWtTour && initialWtTour.steps.length > 0) {
-            setViewedStepId(initialWtTour.activeStepId);
-            const activeTourStep =
-              initialWtTour.steps.find((s) => s.id === initialWtTour.activeStepId) ??
-              initialWtTour.steps[initialWtTour.steps.length - 1];
-            if (activeTourStep) {
-              lastNavigatedStepBySessionRef.current[initialWtTour.sessionId] = activeTourStep.id;
-              applyWalkthroughStepNavigation(activeTourStep);
-            }
-          }
-        }
-      })
-      .catch((err) => {
-        if (mounted) {
-          setBootError(err instanceof Error ? err.message : String(err));
-        }
-      });
-
+    hydrateFromBootstrap().catch((err) => {
+      if (mounted) {
+        setBootError(err instanceof Error ? err.message : String(err));
+      }
+    });
     return () => {
       mounted = false;
     };
@@ -663,6 +778,24 @@ export const App: React.FC = () => {
         }
       } else if (event.type === "native-shortcut") {
         runActionRef.current(event.action as IdeAction);
+      } else if (event.type === "connection-updated") {
+        setConnection(event.connection);
+      } else if (event.type === "plugins-updated") {
+        setPlugins(event.plugins);
+        setPluginDecorations(event.decorations);
+        setPluginCards(event.cards);
+      } else if (event.type === "plugin-event") {
+        const key = `${event.pluginId}::${event.event}`;
+        const listeners = pluginEventListenersRef.current.get(key);
+        if (listeners) {
+          for (const fn of listeners) {
+            try {
+              fn(event.payload);
+            } catch {
+              // ignore
+            }
+          }
+        }
       } else if (event.type === "review-updated") {
         setReviews(event.reviews);
         if (event.reviews.length > 0) {
@@ -944,6 +1077,16 @@ export const App: React.FC = () => {
         case "open-project-window":
           void handleOpenProjectWindow();
           break;
+        case "connect-ssh":
+          setProjectMenuOpen(false);
+          setAgentMenuOpen(false);
+          setConnectSshOpen(true);
+          break;
+        case "manage-plugins":
+          setProjectMenuOpen(false);
+          setAgentMenuOpen(false);
+          setManagePluginsOpen(true);
+          break;
         case "copy-walkthrough-prompt":
           void handleCopyWalkthroughPrompt();
           break;
@@ -1124,6 +1267,8 @@ export const App: React.FC = () => {
           setGoToLineOpen(false);
           setExportModalOpen(false);
           setProjectMenuOpen(false);
+          setConnectSshOpen(false);
+          setManagePluginsOpen(false);
           break;
       }
     },
@@ -1300,6 +1445,9 @@ export const App: React.FC = () => {
     const doc = docsCache[docKey];
     const syms = symbolsCache[docKey] ?? [];
     const fileAnns = worktreeAnnotations.filter((a) => a.filePath === tab.filePath);
+    const filePluginDecs = pluginDecorations.filter(
+      (d) => d.worktreePath === activeWorktreePath && d.filePath === tab.filePath,
+    );
     const matchesInlineTour =
       !isSplitPane &&
       viewedWalkthroughStep !== null &&
@@ -1383,6 +1531,8 @@ export const App: React.FC = () => {
           }}
           worktrees={worktrees}
           annotations={fileAnns}
+          pluginDecorations={filePluginDecs}
+          onOpenExternalUrl={(url) => void window.ide2.openExternalUrl(url)}
           onCreateAnnotation={onCreateAnn}
           onUpdateAnnotation={onEditAnn}
           onResolveAnnotation={(a) => onSetStatus(a, "resolved")}
@@ -1509,6 +1659,100 @@ export const App: React.FC = () => {
       );
     }
 
+    // Check if an enabled plugin contributes a custom read-only viewport for this file pattern
+    let matchedPluginViewport: {
+      pluginId: string;
+      pluginName: string;
+      vpId: string;
+      title: string;
+      Component: React.ComponentType<import("../plugin-sdk/client.js").PluginViewportProps>;
+    } | null = null;
+    for (const p of plugins) {
+      if (!p.enabled || p.error) continue;
+      for (const vp of p.manifest.contributes?.viewports ?? []) {
+        if (matchesPluginFilePattern(tab.filePath, vp.filePatterns)) {
+          const Comp = loadedClientPlugins.viewports.get(`${p.id}:${vp.id}`);
+          if (Comp) {
+            matchedPluginViewport = {
+              pluginId: p.id,
+              pluginName: p.manifest.name,
+              vpId: vp.id,
+              title: vp.title,
+              Component: Comp,
+            };
+            break;
+          }
+        }
+      }
+      if (matchedPluginViewport) break;
+    }
+
+    if (matchedPluginViewport && !rawViewportTabIds[tab.id]) {
+      const VpComp = matchedPluginViewport.Component;
+      const pid = matchedPluginViewport.pluginId;
+      return (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "4px 10px",
+              borderBottom: "1px solid var(--faint)",
+              background: "var(--paper)",
+              fontSize: "11.5px",
+            }}
+          >
+            <span style={{ color: "var(--dim)" }}>
+              {matchedPluginViewport.title} ({matchedPluginViewport.pluginName})
+            </span>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setRawViewportTabIds((prev) => ({ ...prev, [tab.id]: true }))}
+            >
+              Show Raw Code
+            </button>
+          </div>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <PluginErrorBoundary pluginName={matchedPluginViewport.pluginName}>
+              <VpComp
+                filePath={tab.filePath}
+                worktree={activeWorktree}
+                worktrees={worktrees}
+                activeFilePath={tab.filePath}
+                activeLine={cursorPos.line}
+                rpc={{
+                  call: <T = unknown,>(method: string, payload?: unknown) =>
+                    window.ide2.callPluginRpc({
+                      pluginId: pid,
+                      method,
+                      payload,
+                      worktreePath: activeWorktreePath,
+                    }) as Promise<T>,
+                }}
+                subscribeServerEvent={(evt, cb) => subscribePluginServerEvent(pid, evt, cb)}
+                openFile={(fp, opts) =>
+                  void openFileInWorktree(activeWorktreePath, fp, opts)
+                }
+                openExternalUrl={(url) => void window.ide2.openExternalUrl(url)}
+                addReviewNote={async (note) => {
+                  await window.ide2.createAnnotation({
+                    worktreePath: activeWorktreePath,
+                    filePath: note.filePath,
+                    startLine: note.startLine,
+                    endLine: note.endLine,
+                    comment: note.comment,
+                  });
+                  showToast("Added review note");
+                }}
+              />
+            </PluginErrorBoundary>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <CodeViewport
         document={doc}
@@ -1516,6 +1760,8 @@ export const App: React.FC = () => {
         blame={blameEnabled ? blameCache[docKey] : undefined}
         showBlame={blameEnabled}
         annotations={fileAnns}
+        pluginDecorations={filePluginDecs}
+        onOpenExternalUrl={(url) => void window.ide2.openExternalUrl(url)}
         activeLine={cursorPos.line}
         scrollToRequest={!isSplitPane ? scrollToReq : null}
         recentlyUpdatedAt={filePulseAt[docKey]}
@@ -1557,6 +1803,19 @@ export const App: React.FC = () => {
             Launch `ide2` inside any Git repository or worktree directory.
           </p>
         </div>
+      </div>
+    );
+  }
+
+  if (connection.needsBootstrap) {
+    return (
+      <div className="ide-root">
+        <RemoteBootstrapPromptView
+          connection={connection}
+          onBootstrapped={async () => {
+            await hydrateFromBootstrap();
+          }}
+        />
       </div>
     );
   }
@@ -1673,6 +1932,35 @@ export const App: React.FC = () => {
                   <span>Open Project in New Window…</span>
                 </span>
                 <span className="kbd-hint">{formatShortcut("open-project-window", platform)}</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="ide2-project-menu-item"
+                onClick={() => {
+                  setProjectMenuOpen(false);
+                  setConnectSshOpen(true);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  width: "100%",
+                  padding: "6px 8px",
+                  borderRadius: "5px",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--ink)",
+                  fontWeight: 500,
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "7px" }}>
+                  <IconNewWindow size={14} />
+                  <span>Connect to Remote via SSH…</span>
+                </span>
               </button>
 
               {recentProjects.length > 0 && (
@@ -1910,6 +2198,63 @@ export const App: React.FC = () => {
                     Highlight core worktree, diff &amp; review features
                   </span>
                 </button>
+                <div style={{ height: "1px", background: "var(--faint)", margin: "4px 6px" }} />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="ide2-project-menu-item"
+                  onClick={() => {
+                    setAgentMenuOpen(false);
+                    setManagePluginsOpen(true);
+                  }}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: "2px",
+                    width: "100%",
+                    padding: "6px 8px",
+                    borderRadius: "5px",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--ink)",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontWeight: 500 }}>Manage Plugins…</span>
+                  <span style={{ fontSize: "11px", color: "var(--dim)" }}>
+                    Install extensions from GitHub (`ide2 plugin install`)
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="ide2-project-menu-item"
+                  onClick={() => {
+                    setAgentMenuOpen(false);
+                    setConnectSshOpen(true);
+                  }}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: "2px",
+                    width: "100%",
+                    padding: "6px 8px",
+                    borderRadius: "5px",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--ink)",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontWeight: 500 }}>Connect to Remote via SSH…</span>
+                  <span style={{ fontSize: "11px", color: "var(--dim)" }}>
+                    Open remote repository via headless SSH daemon
+                  </span>
+                </button>
               </div>
             )}
           </div>
@@ -1970,6 +2315,19 @@ export const App: React.FC = () => {
         />
       )}
 
+      {/* 2c. Active Plugin Agent Interactive Cards (`ide2 x <subcommand> --wait`) */}
+      {pluginCards
+        .filter((c) => c.worktreePath === activeWorktreePath && c.awaitingUser)
+        .map((card) => (
+          <PluginAgentCardBanner
+            key={card.sessionId}
+            card={card}
+            onRespond={(sessionId, action, message) => {
+              void window.ide2.respondPluginCard({ sessionId, action, message });
+            }}
+          />
+        ))}
+
       {/* 3. Main JetBrains Body: Left Tool Stripe + Left Dock + Editor Canvas + Right Annotations Dock */}
       <div className="ide-body">
         <aside className="tool-stripe" aria-label="Tool Window Bar">
@@ -2008,6 +2366,33 @@ export const App: React.FC = () => {
               <span className="tool-stripe-badge">{openWtAnnotationCount}</span>
             )}
           </button>
+
+          {enabledPluginToolWindows.map((tw) => {
+            const isActive =
+              (tw.slot === "left" && leftTool === tw.key) ||
+              (tw.slot === "bottom" && bottomTool === tw.key) ||
+              (tw.slot === "right" && rightPluginTool === tw.key);
+            return (
+              <button
+                key={tw.key}
+                type="button"
+                className={`tool-stripe-btn${isActive ? " active" : ""}`}
+                title={`${tw.title} (${tw.pluginName})`}
+                onClick={() => {
+                  if (tw.slot === "left") {
+                    setLeftTool((cur) => (cur === tw.key ? null : tw.key));
+                  } else if (tw.slot === "bottom") {
+                    setBottomTool((cur) => (cur === tw.key ? null : tw.key));
+                  } else {
+                    setRightPluginTool((cur) => (cur === tw.key ? null : tw.key));
+                  }
+                }}
+                style={{ fontFamily: "var(--mono)", fontSize: "9.5px", fontWeight: 700 }}
+              >
+                {tw.title.slice(0, 2).toUpperCase()}
+              </button>
+            );
+          })}
         </aside>
 
         {leftTool && (
@@ -2031,7 +2416,7 @@ export const App: React.FC = () => {
                 onSelectFile={(fp) => void openFileInWorktree(activeWorktreePath, fp)}
                 onClose={() => setLeftTool(null)}
               />
-            ) : (
+            ) : leftTool === "structure" ? (
               <StructureToolWindow
                 filePath={activeTab?.filePath}
                 symbols={activeSymbols}
@@ -2044,7 +2429,55 @@ export const App: React.FC = () => {
                 }
                 onClose={() => setLeftTool(null)}
               />
-            )}
+            ) : (() => {
+              const tw = enabledPluginToolWindows.find((t) => t.key === leftTool);
+              const Comp = tw
+                ? loadedClientPlugins.toolWindows.get(`${tw.pluginId}:${tw.twId}`)
+                : undefined;
+              if (!tw || !Comp) {
+                return (
+                  <div style={{ padding: "12px", color: "var(--dim)" }}>
+                    Loading plugin panel…
+                  </div>
+                );
+              }
+              return (
+                <PluginErrorBoundary pluginName={tw.pluginName}>
+                  <Comp
+                    worktree={activeWorktree}
+                    worktrees={worktrees}
+                    activeFilePath={activeTab?.filePath}
+                    activeLine={cursorPos.line}
+                    rpc={{
+                      call: <T = unknown,>(method: string, payload?: unknown) =>
+                        window.ide2.callPluginRpc({
+                          pluginId: tw.pluginId,
+                          method,
+                          payload,
+                          worktreePath: activeWorktreePath,
+                        }) as Promise<T>,
+                    }}
+                    subscribeServerEvent={(evt, cb) =>
+                      subscribePluginServerEvent(tw.pluginId, evt, cb)
+                    }
+                    openFile={(fp, opts) =>
+                      void openFileInWorktree(activeWorktreePath, fp, opts)
+                    }
+                    openExternalUrl={(url) => void window.ide2.openExternalUrl(url)}
+                    addReviewNote={async (note) => {
+                      await window.ide2.createAnnotation({
+                        worktreePath: activeWorktreePath,
+                        filePath: note.filePath,
+                        startLine: note.startLine,
+                        endLine: note.endLine,
+                        comment: note.comment,
+                      });
+                      showToast("Added review note");
+                    }}
+                  />
+                </PluginErrorBoundary>
+              );
+            })()}
           </div>
         )}
 
@@ -2283,7 +2716,7 @@ export const App: React.FC = () => {
                   }
                   onClose={() => setBottomTool(null)}
                 />
-              ) : usagesState ? (
+              ) : bottomTool === "usages" && usagesState ? (
                 <UsagesToolWindow
                   symbolName={usagesState.symbolName}
                   definitions={usagesState.definitions}
@@ -2297,6 +2730,56 @@ export const App: React.FC = () => {
                   }
                   onClose={() => setBottomTool(null)}
                 />
+              ) : bottomTool.startsWith("plugin:") ? (
+                (() => {
+                  const tw = enabledPluginToolWindows.find((t) => t.key === bottomTool);
+                  const Comp = tw
+                    ? loadedClientPlugins.toolWindows.get(`${tw.pluginId}:${tw.twId}`)
+                    : undefined;
+                  if (!tw || !Comp) {
+                    return (
+                      <div style={{ padding: "12px", color: "var(--dim)" }}>
+                        Loading plugin panel…
+                      </div>
+                    );
+                  }
+                  return (
+                    <PluginErrorBoundary pluginName={tw.pluginName}>
+                      <Comp
+                        worktree={activeWorktree}
+                        worktrees={worktrees}
+                        activeFilePath={activeTab?.filePath}
+                        activeLine={cursorPos.line}
+                        rpc={{
+                          call: <T = unknown,>(method: string, payload?: unknown) =>
+                            window.ide2.callPluginRpc({
+                              pluginId: tw.pluginId,
+                              method,
+                              payload,
+                              worktreePath: activeWorktreePath,
+                            }) as Promise<T>,
+                        }}
+                        subscribeServerEvent={(evt, cb) =>
+                          subscribePluginServerEvent(tw.pluginId, evt, cb)
+                        }
+                        openFile={(fp, opts) =>
+                          void openFileInWorktree(activeWorktreePath, fp, opts)
+                        }
+                        openExternalUrl={(url) => void window.ide2.openExternalUrl(url)}
+                        addReviewNote={async (note) => {
+                          await window.ide2.createAnnotation({
+                            worktreePath: activeWorktreePath,
+                            filePath: note.filePath,
+                            startLine: note.startLine,
+                            endLine: note.endLine,
+                            comment: note.comment,
+                          });
+                          showToast("Added review note");
+                        }}
+                      />
+                    </PluginErrorBoundary>
+                  );
+                })()
               ) : null}
             </div>
           )}
@@ -2341,11 +2824,59 @@ export const App: React.FC = () => {
             />
           </div>
         )}
+
+        {rightPluginTool &&
+          (() => {
+            const tw = enabledPluginToolWindows.find((t) => t.key === rightPluginTool);
+            const Comp = tw
+              ? loadedClientPlugins.toolWindows.get(`${tw.pluginId}:${tw.twId}`)
+              : undefined;
+            if (!tw || !Comp) return null;
+            return (
+              <div className="tool-dock tool-dock-right" style={{ width: "330px", flexShrink: 0 }}>
+                <PluginErrorBoundary pluginName={tw.pluginName}>
+                  <Comp
+                    worktree={activeWorktree}
+                    worktrees={worktrees}
+                    activeFilePath={activeTab?.filePath}
+                    activeLine={cursorPos.line}
+                    rpc={{
+                      call: <T = unknown,>(method: string, payload?: unknown) =>
+                        window.ide2.callPluginRpc({
+                          pluginId: tw.pluginId,
+                          method,
+                          payload,
+                          worktreePath: activeWorktreePath,
+                        }) as Promise<T>,
+                    }}
+                    subscribeServerEvent={(evt, cb) =>
+                      subscribePluginServerEvent(tw.pluginId, evt, cb)
+                    }
+                    openFile={(fp, opts) =>
+                      void openFileInWorktree(activeWorktreePath, fp, opts)
+                    }
+                    openExternalUrl={(url) => void window.ide2.openExternalUrl(url)}
+                    addReviewNote={async (note) => {
+                      await window.ide2.createAnnotation({
+                        worktreePath: activeWorktreePath,
+                        filePath: note.filePath,
+                        startLine: note.startLine,
+                        endLine: note.endLine,
+                        comment: note.comment,
+                      });
+                      showToast("Added review note");
+                    }}
+                  />
+                </PluginErrorBoundary>
+              </div>
+            );
+          })()}
       </div>
 
       {/* 4. Dense Bottom Statusline */}
       <Statusline
         worktree={activeWorktree}
+        connection={connection}
         filePath={activeTab?.filePath}
         line={cursorPos.line}
         column={cursorPos.column}
@@ -2354,12 +2885,24 @@ export const App: React.FC = () => {
         crtEnabled={crtEnabled}
         openAnnotationCount={openWtAnnotationCount}
         lastUpdatedAt={lastUpdatedAt}
-        watcherActive={true}
+        watcherActive={
+          !connection.isRemote || connection.status === "connected"
+        }
         platform={platform}
         onToggleBlame={() => setBlameEnabled((v) => !v)}
         onToggleCrt={() => setCrtEnabled((v) => !v)}
         onOpenAnnotations={() => setRightAnnotationsOpen((v) => !v)}
         onOpenGoToLine={() => setGoToLineOpen(true)}
+        onReconnectSsh={
+          connection.isRemote
+            ? () => {
+                void window.ide2.reconnectRemoteSsh();
+                showToast("Reconnecting SSH session…");
+              }
+            : undefined
+        }
+        onOpenManagePlugins={() => setManagePluginsOpen(true)}
+        pluginCount={plugins.filter((p) => p.enabled).length}
         onCopyFeedbackPrompt={() => handleCopyPromptQuick()}
       />
 
@@ -2369,6 +2912,7 @@ export const App: React.FC = () => {
         initialTab={searchPopup.tab}
         activeWorktree={activeWorktree}
         worktrees={worktrees}
+        pluginActions={enabledPluginActions}
         platform={platform}
         onSearchFiles={handleSearchFilesMemo}
         onSearchSymbols={handleSearchSymbolsMemo}
@@ -2377,6 +2921,16 @@ export const App: React.FC = () => {
         }
         onSelectWorktree={(wtPath) => setActiveWorktreePath(wtPath)}
         onRunAction={(act) => runAction(act)}
+        onRunPluginAction={(pluginId, actionId) => {
+          void window.ide2.triggerPluginAction({
+            pluginId,
+            actionId,
+            worktreePath: activeWorktreePath,
+            filePath: activeTab?.filePath,
+            line: cursorPos.line,
+          });
+          showToast(`Triggered ${actionId}`);
+        }}
         onClose={() => setSearchPopup((p) => ({ ...p, open: false }))}
       />
 
@@ -2557,6 +3111,23 @@ export const App: React.FC = () => {
         onFinish={handleFinishOnboarding}
         onCopyReviewPrompt={handleCopyReviewPrompt}
         onCopyWalkthroughPrompt={handleCopyWalkthroughPrompt}
+      />
+
+      {/* Remote SSH Connection & GitHub Plugin Manager Modals */}
+      <ConnectSshModal
+        open={connectSshOpen}
+        onClose={() => setConnectSshOpen(false)}
+        onConnected={(repoName) => {
+          if (repoName) showToast(`Connected to ${repoName} via SSH`);
+        }}
+      />
+
+      <ManagePluginsModal
+        open={managePluginsOpen}
+        plugins={plugins}
+        connection={connection}
+        onRefreshPlugins={refreshPluginsList}
+        onClose={() => setManagePluginsOpen(false)}
       />
 
       {/* Toast Notification */}

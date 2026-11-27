@@ -20,7 +20,7 @@ export class RecentProjectsStore {
 
   list(): RecentProject[] {
     const all = this.readRaw();
-    return all.filter((entry) => existsSync(entry.path));
+    return all.filter((entry) => Boolean(entry.isRemote) || existsSync(entry.path));
   }
 
   record(project: {
@@ -28,6 +28,8 @@ export class RecentProjectsStore {
     repoCommonDir: string;
     name: string;
     lastOpenedAt?: number;
+    isRemote?: boolean;
+    sshTarget?: string;
   }): RecentProject[] {
     const existing = this.readRaw().filter(
       (item) => item.repoCommonDir !== project.repoCommonDir && item.path !== project.path,
@@ -38,12 +40,14 @@ export class RecentProjectsStore {
         repoCommonDir: project.repoCommonDir,
         name: project.name,
         lastOpenedAt: project.lastOpenedAt ?? Date.now(),
+        ...(project.isRemote ? { isRemote: true } : {}),
+        ...(project.sshTarget ? { sshTarget: project.sshTarget } : {}),
       },
       ...existing,
     ].slice(0, MAX_RECENT_PROJECTS);
 
     this.writeAtomic(updated);
-    return updated.filter((entry) => existsSync(entry.path));
+    return updated.filter((entry) => Boolean(entry.isRemote) || existsSync(entry.path));
   }
 
   private readRaw(): RecentProject[] {

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
-import type { WorktreeInfo } from "../../shared/protocol.js";
+import type { RemoteConnectionState, WorktreeInfo } from "../../shared/protocol.js";
 import { Expect2CursorMark, IconGitBranch } from "../components/BrandMark.js";
 import { formatShortcut, type Platform } from "./keymap.js";
 import { formatRelativeActivity } from "./WorktreeStrip.js";
 
 export interface StatuslineProps {
   worktree?: WorktreeInfo;
+  connection?: RemoteConnectionState;
   filePath?: string;
   line?: number;
   column?: number;
@@ -20,11 +21,15 @@ export interface StatuslineProps {
   onToggleCrt: () => void;
   onOpenAnnotations: () => void;
   onOpenGoToLine?: () => void;
+  onReconnectSsh?: () => void;
+  onOpenManagePlugins?: () => void;
+  pluginCount?: number;
   onCopyFeedbackPrompt: () => Promise<void> | void;
 }
 
 export const Statusline: React.FC<StatuslineProps> = ({
   worktree,
+  connection,
   filePath,
   line = 1,
   column = 1,
@@ -39,6 +44,9 @@ export const Statusline: React.FC<StatuslineProps> = ({
   onToggleCrt,
   onOpenAnnotations,
   onOpenGoToLine,
+  onReconnectSsh,
+  onOpenManagePlugins,
+  pluginCount = 0,
   onCopyFeedbackPrompt,
 }) => {
   const [now, setNow] = useState<number>(() => Date.now());
@@ -101,6 +109,48 @@ export const Statusline: React.FC<StatuslineProps> = ({
         >
           READ-ONLY
         </span>
+
+        {connection?.isRemote && (
+          <button
+            type="button"
+            onClick={onReconnectSsh}
+            title={
+              connection.status === "connected"
+                ? `Connected to ${connection.sshTarget} (${connection.rttMs ?? "?"}ms RTT)`
+                : `${connection.error ?? connection.status} — click to reconnect`
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              background:
+                connection.status === "connected"
+                  ? "rgba(109, 255, 166, 0.1)"
+                  : "rgba(255, 228, 92, 0.14)",
+              border:
+                connection.status === "connected"
+                  ? "1px solid rgba(109, 255, 166, 0.35)"
+                  : "1px solid rgba(255, 228, 92, 0.45)",
+              color:
+                connection.status === "connected"
+                  ? "var(--safe, #6dffa6)"
+                  : "var(--unknown, #ffe45c)",
+              padding: "1px 7px",
+              borderRadius: "4px",
+              fontSize: "10.5px",
+              fontFamily: "var(--mono)",
+              fontWeight: 600,
+              cursor: onReconnectSsh ? "pointer" : "default",
+            }}
+          >
+            <span>
+              SSH:{connection.sshHost}
+              {connection.status === "connected" && connection.rttMs
+                ? ` · ${connection.rttMs}ms`
+                : ` · ${connection.status}`}
+            </span>
+          </button>
+        )}
 
         {worktree && (
           <span
@@ -211,6 +261,23 @@ export const Statusline: React.FC<StatuslineProps> = ({
         >
           CRT
         </button>
+
+        {onOpenManagePlugins && (
+          <button
+            type="button"
+            onClick={onOpenManagePlugins}
+            title="Manage ide2 Plugins"
+            style={{
+              ...statusBtnStyle,
+              fontFamily: "var(--mono)",
+              background: "transparent",
+              borderColor: "var(--faint)",
+              color: "var(--dim)",
+            }}
+          >
+            Plugins{pluginCount > 0 ? ` (${pluginCount})` : ""}
+          </button>
+        )}
 
         <button
           type="button"

@@ -11,9 +11,11 @@ import type {
   DiffRow,
   DiffScope,
   FileDiffResult,
+  PluginLineDecoration,
   WordDiffPart,
   WorktreeInfo,
 } from "../../shared/protocol";
+import { PluginDecorationCards } from "../plugins/runtime-host";
 import { AnnotationComposer, AnnotationThreadCard } from "./AnnotationCard";
 
 export type DiffViewMode = "split" | "unified";
@@ -25,6 +27,8 @@ export interface DiffViewportProps {
   onScopeChange?: (scope: DiffScope) => void;
   worktrees?: WorktreeInfo[];
   annotations?: Annotation[];
+  pluginDecorations?: PluginLineDecoration[];
+  onOpenExternalUrl?: (url: string) => void;
   onCreateAnnotation?: (input: {
     side: "new" | "old";
     startLine: number;
@@ -135,6 +139,8 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
   onScopeChange,
   worktrees = [],
   annotations = [],
+  pluginDecorations = [],
+  onOpenExternalUrl,
   onCreateAnnotation,
   onUpdateAnnotation,
   onResolveAnnotation,
@@ -383,6 +389,18 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
       newGutter: nGutter,
     };
   }, [annotations]);
+
+  const newPluginDecsByLine = useMemo(() => {
+    const map = new Map<number, PluginLineDecoration[]>();
+    for (const dec of pluginDecorations) {
+      if (dec.side === "old") continue;
+      const anchor = dec.endLine ?? dec.startLine;
+      const list = map.get(anchor);
+      if (list) list.push(dec);
+      else map.set(anchor, [dec]);
+    }
+    return map;
+  }, [pluginDecorations]);
 
   const handleLineSelect = (
     e: React.MouseEvent,
@@ -673,6 +691,9 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                 const newAnnList = hasNew
                   ? newThreads.get(row.newLineNumber!) ?? []
                   : [];
+                const newPluginDecList = hasNew
+                  ? newPluginDecsByLine.get(row.newLineNumber!) ?? []
+                  : [];
                 const oldLead = hasOld
                   ? oldGutter.get(row.oldLineNumber!)?.[0]
                   : undefined;
@@ -883,11 +904,28 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
 
                     {(oldAnnList.length > 0 ||
                       newAnnList.length > 0 ||
+                      newPluginDecList.length > 0 ||
                       showOldComposer ||
                       showNewComposer ||
                       showSpotlightHere) && (
                       <div className="code-inline-slot">
                         {showSpotlightHere && spotlight?.card}
+                        {newPluginDecList.length > 0 && (
+                          <PluginDecorationCards
+                            decorations={newPluginDecList}
+                            onOpenExternalUrl={onOpenExternalUrl}
+                            onQuickAnnotate={
+                              onCreateAnnotation && row.newLineNumber
+                                ? (dec) =>
+                                    openComposer(
+                                      "new",
+                                      dec.startLine,
+                                      dec.endLine ?? dec.startLine,
+                                    )
+                                : undefined
+                            }
+                          />
+                        )}
                         {oldAnnList.length > 0 && (
                           <AnnotationThreadCard
                             annotations={oldAnnList}
@@ -969,6 +1007,10 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                   ? item.side === "old"
                     ? oldThreads.get(targetLine) ?? []
                     : newThreads.get(targetLine) ?? []
+                  : [];
+              const unifiedPluginDecList =
+                targetLine !== undefined && item.side === "new"
+                  ? newPluginDecsByLine.get(targetLine) ?? []
                   : [];
 
               const leadAnn =
@@ -1082,9 +1124,28 @@ export const DiffViewport: React.FC<DiffViewportProps> = ({
                     </div>
                   </div>
 
-                  {(threadList.length > 0 || showComposerHere || showSpotlightHere) && (
+                  {(threadList.length > 0 ||
+                    unifiedPluginDecList.length > 0 ||
+                    showComposerHere ||
+                    showSpotlightHere) && (
                     <div className="code-inline-slot">
                       {showSpotlightHere && spotlight?.card}
+                      {unifiedPluginDecList.length > 0 && (
+                        <PluginDecorationCards
+                          decorations={unifiedPluginDecList}
+                          onOpenExternalUrl={onOpenExternalUrl}
+                          onQuickAnnotate={
+                            onCreateAnnotation && targetLine !== undefined
+                              ? (dec) =>
+                                  openComposer(
+                                    "new",
+                                    dec.startLine,
+                                    dec.endLine ?? dec.startLine,
+                                  )
+                              : undefined
+                          }
+                        />
+                      )}
                       {threadList.length > 0 && (
                         <AnnotationThreadCard
                           annotations={threadList}

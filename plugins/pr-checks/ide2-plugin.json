@@ -1,0 +1,32 @@
+{
+  "id": "pr-checks",
+  "name": "GitHub PR & CI Checks Lens",
+  "version": "0.1.0",
+  "description": "Surfaces GitHub Pull Request status, CI check runs, and inline file:line check annotations using local gh CLI auth.",
+  "author": "expect2",
+  "repository": "https://github.com/expect2/ide2",
+  "host": "client",
+  "engine": {
+    "ide2": ">=0.1.0"
+  },
+  "permissions": ["exec"],
+  "server": "./src/server.ts",
+  "client": "./src/client.tsx",
+  "skill": "./SKILL.md",
+  "contributes": {
+    "toolWindows": [
+      {
+        "id": "pr-checks-panel",
+        "title": "PR & CI Checks",
+        "slot": "bottom"
+      }
+    ],
+    "actions": [
+      {
+        "id": "refresh-pr-checks",
+        "title": "GitHub PR: Refresh CI Checks & Annotations",
+        "description": "Query gh CLI for active branch Pull Request status and inline check annotations"
+      }
+    ]
+  }
+}
