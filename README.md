@@ -89,13 +89,62 @@ And your IDE shouldn't *be* your agent. Bundling an AI harness inside an editor 
 - **Remote agent loops out of the box:** The remote `ide2 daemon --stdio` hosts `TourServer` on the remote machine, so coding agents running inside remote `tmux` / SSH terminals can run `ide2 review wait`, `ide2 tour`, and `ide2 x <subcommand>` locally with zero port forwarding.
 - Live RTT pill (`SSH:host · 14ms`), automatic exponential-backoff reconnect, and local Shiki + Tree-sitter syntax/AST acceleration.
 
-### GitHub-Installable Plugin System (`ide2 plugin`)
-- Extend `ide2` with read-only inspection panels, custom file viewports, inline code/diff line decorations, review prompt enrichers, and agent CLI commands (`ide2 x <subcommand>`) — installed directly from GitHub repositories with **immutable 40-char commit SHA pinning** in `~/.expect2-ide/plugins/lock.json` and explicit permission approval (`exec`, `network`, `agent-ipc`).
-- **Dual-host affinity (`"host": "client" | "workspace"`):**
-  - `"client"` *(default)* plugins install once on your laptop, use your local credentials (e.g. macOS Keychain `gh` auth), and work immediately across every remote SSH host.
-  - `"workspace"` plugins run next to the remote repo and terminal coding agents inside `ide2 daemon`, streaming their UI panels and line decorations back to your local window.
-- **Built-in reference plugin — GitHub PR & CI Checks Lens (`pr-checks`):** Uses your local `gh` CLI to inspect the active branch's Pull Request, shows the **PR & CI Checks** bottom panel, paints failing GitHub Actions file:line annotations directly inline on code & diffs, and appends failing CI context to exported review prompts.
-- Manage plugins in-app via **`Plugins`** in the statusline or **Search Everywhere (`⇧⇧` → `Manage Plugins…`)**, or author your own in seconds with `ide2 plugin init ./my-lens && ide2 plugin install ./my-lens --link` (hot-reloads on save). Running `ide2 install-skill` also syncs `SKILL.md` files from enabled plugins.
+---
+
+## Plugins & Extensions
+
+`ide2` stays small at its core by design — and lets you extend what you **see** about your code and how you **steer** terminal agents through lightweight, read-only plugins installed directly from GitHub repositories.
+
+### Installing Plugins from GitHub
+
+Install any plugin repo via the CLI or the in-app **Manage Plugins…** modal (**Statusline → `Plugins`**, **Window → Manage Plugins…**, or **Search Everywhere `⇧⇧`**):
+
+```bash
+ide2 plugin install owner/repo                          # Install from GitHub (default branch)
+ide2 plugin install owner/repo#v0.2.0                   # Pin a tag, branch, or commit SHA
+ide2 plugin install owner/repo/packages/my-lens#main    # Install from a monorepo subdirectory
+ide2 plugin list                                        # Show installed plugins, SHAs & permissions
+ide2 plugin update [plugin-id]                          # Update to latest upstream commit
+ide2 plugin disable <plugin-id>                         # Disable without removing
+ide2 plugin remove <plugin-id>                          # Uninstall cleanly
+```
+
+- **Immutable commit pinning:** Every GitHub install records the exact **40-character commit SHA** in `~/.expect2-ide/plugins/lock.json`.
+- **Read-only by default & explicit permissions:** Plugins receive read-only workspace APIs and isolated storage (`~/.expect2-ide/plugin-data/<id>/`). Elevated capabilities (`exec`, `network`, `agent-ipc`) must be declared in `ide2-plugin.json` and explicitly approved on install (or whenever an update adds a new permission).
+- **Zero publisher build boilerplate:** GitHub plugin repos can ship plain TypeScript/TSX (`src/server.ts`, `src/client.tsx`) with zero `node_modules` — `ide2` bundles them automatically on install using shared React & SDK shims.
+
+### What Plugins Can Extend
+
+- **Inline Code & Diff Decorations:** Paint severity badges and expandable Markdown details directly on lines in Code and Diff viewports (zero React required).
+- **Tool Windows & Custom Read-Only Viewports:** Add panels to the left, right, or bottom docks, or register custom tab viewers for matching file patterns (e.g. `*.trace.json`, `*.openapi.yaml`), wrapped in isolated error boundaries.
+- **Review Prompt Enrichers:** Automatically attach structured diagnostic context (such as failing CI checks or verification traces) when compiling Markdown review feedback.
+- **Agent CLI Subcommands & Skills (`ide2 x`):** Register custom `ide2 x <subcommand>` commands on `TourServer` — including interactive human-in-the-loop decision cards that block the terminal agent until you respond. Running `ide2 install-skill` automatically syncs `SKILL.md` files from all enabled plugins.
+
+### Dual-Host Execution (Local & Remote SSH)
+
+Each plugin declares `"host": "client" | "workspace"` in `ide2-plugin.json`:
+
+- **`"host": "client"` *(default)*:** Installs once on your laptop, runs using your local credentials (such as macOS Keychain `gh` auth), and works immediately across local repos and every remote `ide2 ssh` host.
+- **`"host": "workspace"`:** Runs on whichever machine holds the repository (inside `ide2 daemon` during `ide2 ssh`), right next to remote build tools and remote terminal coding agents, streaming decorations and UI bundles back to your local window.
+
+### Built-In Reference Plugin: GitHub PR & CI Checks Lens
+
+`ide2` ships with [`plugins/pr-checks`](./plugins/pr-checks) (`"host": "client"`, `"permissions": ["exec"]`) enabled out of the box:
+
+- Uses your local `gh` CLI auth to inspect the active worktree branch's Pull Request — locally and over SSH.
+- Adds the **PR & CI Checks** bottom panel with check rollups, review status, **Open PR ↗**, and one-click **+ Add Failing Checks to Review**.
+- Surfaces GitHub Actions file:line annotations inline on code and diffs and enriches exported review prompts with failing CI checks.
+
+### Authoring a Plugin
+
+Scaffold a working TypeScript/TSX plugin (or ask your coding agent to write one) and link it for live hot-reload:
+
+```bash
+ide2 plugin init ./my-lens --id my-lens
+ide2 plugin install ./my-lens --link
+```
+
+Edits inside `./my-lens/src/` rebuild and reload automatically inside `ide2`.
 
 ---
 
