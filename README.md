@@ -115,20 +115,15 @@ ide2 plugin remove <plugin-id>                          # Uninstall cleanly
 
 ### Create a Plugin with Claude Code or Grok Build
 
-You don't have to write plugins by hand — `ide2` ships a full technical plugin specification in [`AGENTS.md`](./AGENTS.md#3-creating-an-ide2-plugin) (referenced by [`CLAUDE.md`](./CLAUDE.md)) and zero-boilerplate TypeScript bundling. Point **Claude Code**, **Grok Build**, or any terminal coding agent at a prompt like this:
+You don't have to write plugins by hand — just describe what you want in **Claude Code**, **Grok Build**, or any coding agent:
 
-> **Prompt example (paste into Claude Code or Grok Build):**
->
 > ```text
-> Read AGENTS.md (section "Creating an ide2 Plugin") and plugins/pr-checks/ as a reference.
-> Build a new ide2 plugin in ./my-coverage-lens that reads coverage/lcov.info in the active worktree,
-> paints inline line decorations on uncovered lines added in the current diff, and adds a bottom
-> "Coverage" panel listing the lowest-coverage changed files with click-to-jump.
-> Scaffold it with `ide2 plugin init ./my-coverage-lens`, link it with
-> `ide2 plugin install ./my-coverage-lens --link`, and verify it builds cleanly.
+> Build an ide2 plugin that reads coverage/lcov.info in the active worktree, highlights uncovered
+> lines added in the current diff, and adds a bottom "Coverage" panel listing the lowest-coverage
+> changed files with click-to-jump. Link it locally so I can try it right away.
 > ```
 
-Edits inside `./my-coverage-lens/src/` rebuild and hot-reload inside `ide2` automatically. For the full manifest schema, server/client SDK reference, and `ide2 x <subcommand>` agent card API, see [`AGENTS.md`](./AGENTS.md#3-creating-an-ide2-plugin).
+Edits hot-reload automatically inside `ide2`. Full plugin SDK details live in [`AGENTS.md`](./AGENTS.md#3-creating-an-ide2-plugin).
 
 ---
 
