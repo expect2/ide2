@@ -234,6 +234,25 @@ export const App: React.FC = () => {
   const pluginEventListenersRef = useRef<
     Map<string, Set<(payload: unknown) => void>>
   >(new Map());
+  const pluginRpcCacheRef = useRef<
+    Map<string, { call<T = unknown>(method: string, payload?: unknown): Promise<T> }>
+  >(new Map());
+  const getPluginRpc = useCallback((pluginId: string) => {
+    let cached = pluginRpcCacheRef.current.get(pluginId);
+    if (!cached) {
+      cached = {
+        call: <T = unknown,>(method: string, payload?: unknown) =>
+          window.ide2.callPluginRpc({
+            pluginId,
+            method,
+            payload,
+            worktreePath: activeWtRef.current,
+          }) as Promise<T>,
+      };
+      pluginRpcCacheRef.current.set(pluginId, cached);
+    }
+    return cached;
+  }, []);
   const [viewedStepId, setViewedStepId] = useState<string>("");
   const [folderFocusReq, setFolderFocusReq] = useState<{
     dirPath: string;
@@ -1722,15 +1741,7 @@ export const App: React.FC = () => {
                 worktrees={worktrees}
                 activeFilePath={tab.filePath}
                 activeLine={cursorPos.line}
-                rpc={{
-                  call: <T = unknown,>(method: string, payload?: unknown) =>
-                    window.ide2.callPluginRpc({
-                      pluginId: pid,
-                      method,
-                      payload,
-                      worktreePath: activeWorktreePath,
-                    }) as Promise<T>,
-                }}
+                rpc={getPluginRpc(pid)}
                 subscribeServerEvent={(evt, cb) => subscribePluginServerEvent(pid, evt, cb)}
                 openFile={(fp, opts) =>
                   void openFileInWorktree(activeWorktreePath, fp, opts)
@@ -2448,15 +2459,7 @@ export const App: React.FC = () => {
                     worktrees={worktrees}
                     activeFilePath={activeTab?.filePath}
                     activeLine={cursorPos.line}
-                    rpc={{
-                      call: <T = unknown,>(method: string, payload?: unknown) =>
-                        window.ide2.callPluginRpc({
-                          pluginId: tw.pluginId,
-                          method,
-                          payload,
-                          worktreePath: activeWorktreePath,
-                        }) as Promise<T>,
-                    }}
+                    rpc={getPluginRpc(tw.pluginId)}
                     subscribeServerEvent={(evt, cb) =>
                       subscribePluginServerEvent(tw.pluginId, evt, cb)
                     }
@@ -2750,15 +2753,7 @@ export const App: React.FC = () => {
                         worktrees={worktrees}
                         activeFilePath={activeTab?.filePath}
                         activeLine={cursorPos.line}
-                        rpc={{
-                          call: <T = unknown,>(method: string, payload?: unknown) =>
-                            window.ide2.callPluginRpc({
-                              pluginId: tw.pluginId,
-                              method,
-                              payload,
-                              worktreePath: activeWorktreePath,
-                            }) as Promise<T>,
-                        }}
+                        rpc={getPluginRpc(tw.pluginId)}
                         subscribeServerEvent={(evt, cb) =>
                           subscribePluginServerEvent(tw.pluginId, evt, cb)
                         }
@@ -2840,15 +2835,7 @@ export const App: React.FC = () => {
                     worktrees={worktrees}
                     activeFilePath={activeTab?.filePath}
                     activeLine={cursorPos.line}
-                    rpc={{
-                      call: <T = unknown,>(method: string, payload?: unknown) =>
-                        window.ide2.callPluginRpc({
-                          pluginId: tw.pluginId,
-                          method,
-                          payload,
-                          worktreePath: activeWorktreePath,
-                        }) as Promise<T>,
-                    }}
+                    rpc={getPluginRpc(tw.pluginId)}
                     subscribeServerEvent={(evt, cb) =>
                       subscribePluginServerEvent(tw.pluginId, evt, cb)
                     }

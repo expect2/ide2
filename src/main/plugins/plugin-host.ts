@@ -66,6 +66,7 @@ export class PluginHost implements PluginRuntimeController {
   private readonly runtimeErrors = new Map<string, string>();
   private readonly activeLoadedIds = new Set<string>();
   private readonly reloadStampByPlugin = new Map<string, number>();
+  private readonly reloadingByPlugin = new Map<string, Promise<void>>();
   private readonly linkWatchers = new Map<string, FSWatcher>();
   private lockDirWatcher: FSWatcher | null = null;
   private readonly cardSessions = new Map<string, PendingCardSession>();
@@ -146,7 +147,9 @@ export class PluginHost implements PluginRuntimeController {
         } else if (msg.kind === "worker-evt") {
           if (msg.type === "decorations") {
             this.decorationsByPlugin.set(msg.pluginId, msg.decorations);
-            this.emitSnapshot();
+            if (!this.reloadingByPlugin.has(msg.pluginId)) {
+              this.emitSnapshot();
+            }
           } else if (msg.type === "client-event") {
             this.opts.onPluginEvent?.(msg.pluginId, msg.event, msg.payload);
           }
@@ -167,7 +170,9 @@ export class PluginHost implements PluginRuntimeController {
       presentCardAndWait: (params) => this.presentCardInternal(params),
       onDecorationsUpdated: (pluginId, decorations) => {
         this.decorationsByPlugin.set(pluginId, decorations);
-        this.emitSnapshot();
+        if (!this.reloadingByPlugin.has(pluginId)) {
+          this.emitSnapshot();
+        }
       },
       onClientEvent: (pluginId, event, payload) => {
         this.opts.onPluginEvent?.(pluginId, event, payload);
@@ -408,15 +413,28 @@ export class PluginHost implements PluginRuntimeController {
     const target = all.find((p) => p.id === pluginId);
     if (!target) return;
     const dir = this.installer.getPluginDir(pluginId);
+
+    const run = (async () => {
+      try {
+        await bundlePluginDirectory(dir, target.manifest);
+        const prevStamp = this.reloadStampByPlugin.get(pluginId) ?? target.updatedAt;
+        this.reloadStampByPlugin.set(pluginId, Math.max(Date.now(), prevStamp + 1));
+        this.activeLoadedIds.delete(pluginId);
+        await this.callRunner("unloadPlugin", { pluginId }).catch(() => {});
+        await this.reconcileActivePlugins();
+      } catch (err) {
+        this.runtimeErrors.set(pluginId, err instanceof Error ? err.message : String(err));
+        this.emitSnapshot();
+      }
+    })();
+
+    this.reloadingByPlugin.set(pluginId, run);
     try {
-      await bundlePluginDirectory(dir, target.manifest);
-      const prevStamp = this.reloadStampByPlugin.get(pluginId) ?? target.updatedAt;
-      this.reloadStampByPlugin.set(pluginId, Math.max(Date.now(), prevStamp + 1));
-      this.activeLoadedIds.delete(pluginId);
-      await this.callRunner("unloadPlugin", { pluginId }).catch(() => {});
-      await this.reconcileActivePlugins();
-    } catch (err) {
-      this.runtimeErrors.set(pluginId, err instanceof Error ? err.message : String(err));
+      await run;
+    } finally {
+      if (this.reloadingByPlugin.get(pluginId) === run) {
+        this.reloadingByPlugin.delete(pluginId);
+      }
       this.emitSnapshot();
     }
   }
@@ -508,6 +526,10 @@ export class PluginHost implements PluginRuntimeController {
     payload?: unknown;
     worktreePath?: string;
   }): Promise<unknown> {
+    const inflightReload = this.reloadingByPlugin.get(params.pluginId);
+    if (inflightReload) {
+      await inflightReload;
+    }
     return this.callRunner("callRpc", params);
   }
 
