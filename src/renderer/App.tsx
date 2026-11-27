@@ -2224,7 +2224,7 @@ export const App: React.FC = () => {
                 >
                   <span style={{ fontWeight: 500 }}>Manage Plugins…</span>
                   <span style={{ fontSize: "11px", color: "var(--dim)" }}>
-                    Install extensions from GitHub (`ide2 plugin install`)
+                    Install plugins from GitHub (`ide2 plugin install`)
                   </span>
                 </button>
                 <button

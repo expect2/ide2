@@ -9,7 +9,7 @@ import { getTourEndpointPaths } from "../shared/walkthrough-prompt.js";
 
 export function formatPluginHelp(): string {
   return [
-    "ide2 plugin — install and manage ide2 extensions from GitHub repositories",
+    "ide2 plugin — install and manage ide2 plugins from GitHub repositories",
     "",
     "Usage:",
     "  ide2 plugin install <owner/repo[#ref] | url | ./path> [--yes] [--link]",

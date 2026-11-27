@@ -636,7 +636,7 @@ export const ManagePluginsModal: React.FC<{
           <div>
             <div style={{ fontWeight: 600, fontSize: "13.5px" }}>Manage ide2 Plugins</div>
             <div style={{ fontSize: "11.5px", color: "var(--dim)", marginTop: "2px" }}>
-              Install extensions from GitHub repositories (`owner/repo[#ref]`) with pinned commit SHAs
+              Install plugins from GitHub repositories (`owner/repo[#ref]`) with pinned commit SHAs
             </div>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
