@@ -28,6 +28,7 @@ export type IdeAction =
   | "switch-worktree"
   | "open-project-window"
   | "copy-walkthrough-prompt"
+  | "show-onboarding"
   | "close-tab"
   | "prev-tab"
   | "next-tab"
@@ -203,6 +204,12 @@ export const IDE_ACTIONS: readonly ActionDescriptor[] = [
     label: "Copy Walkthrough Prompt for Agent",
     description: "Copy ready-to-paste prompt so any coding agent can guide you through this repo",
     category: "Review",
+  },
+  {
+    action: "show-onboarding",
+    label: "Show Onboarding Walkthrough",
+    description: "Replay the interactive first-run overview of ide2's core features",
+    category: "Navigation",
   },
   {
     action: "close-tab",
@@ -538,6 +545,8 @@ export function formatShortcut(action: IdeAction, platform: Platform): string {
       return isMac ? "⇧⌘N" : "Ctrl+Shift+N";
     case "copy-walkthrough-prompt":
       return isMac ? "⇧⌘T" : "Ctrl+Shift+T";
+    case "show-onboarding":
+      return "";
     case "close-tab":
       return isMac ? "⌘W" : "Ctrl+W";
     case "prev-tab":

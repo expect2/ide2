@@ -51,6 +51,7 @@ const bridge: Ide2Bridge = {
   sendReviewResponse: (response: ReviewUserResponse) =>
     ipcRenderer.invoke("ide2:sendReviewResponse", response),
   getReviewAgentPrompt: () => ipcRenderer.invoke("ide2:getReviewAgentPrompt"),
+  completeOnboarding: () => ipcRenderer.invoke("ide2:completeOnboarding"),
   onEvent: (listener: (event: WorkspaceEvent) => void) => {
     const handler = (_evt: Electron.IpcRendererEvent, payload: WorkspaceEvent) => {
       listener(payload);

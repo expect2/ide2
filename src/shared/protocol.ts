@@ -388,6 +388,7 @@ export interface Ide2Bridge {
     annotations: Annotation[];
     walkthroughs: WalkthroughState[];
     reviews: ReviewSessionState[];
+    showOnboarding: boolean;
   }>;
   listFiles(worktreePath: string): Promise<FileEntry[]>;
   fuzzyFindFiles(params: {
@@ -432,5 +433,6 @@ export interface Ide2Bridge {
   getWalkthroughAgentPrompt(): Promise<string>;
   sendReviewResponse(response: ReviewUserResponse): Promise<{ sent: boolean; count: number }>;
   getReviewAgentPrompt(): Promise<string>;
+  completeOnboarding(): Promise<void>;
   onEvent(listener: (event: WorkspaceEvent) => void): () => void;
 }

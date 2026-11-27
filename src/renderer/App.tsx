@@ -49,6 +49,7 @@ import {
   type SearchEverywhereTab,
 } from "./shell/Popups.js";
 import { Statusline } from "./shell/Statusline.js";
+import { OnboardingTour } from "./views/OnboardingTour.js";
 import {
   closeAllTabs,
   closeOtherTabs,
@@ -202,6 +203,7 @@ export const App: React.FC = () => {
   const [walkthroughs, setWalkthroughs] = useState<WalkthroughState[]>([]);
   const [reviews, setReviews] = useState<ReviewSessionState[]>([]);
   const [selectedReviewSessionId, setSelectedReviewSessionId] = useState<string>("");
+  const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState<boolean>(false);
   const [viewedStepId, setViewedStepId] = useState<string>("");
   const [folderFocusReq, setFolderFocusReq] = useState<{
@@ -475,7 +477,7 @@ export const App: React.FC = () => {
     let mounted = true;
     window.ide2
       .getBootstrap()
-      .then(async ({ context: ctx, worktrees: wts, annotations: anns, walkthroughs: initialWtTours, reviews: initialReviews }) => {
+      .then(async ({ context: ctx, worktrees: wts, annotations: anns, walkthroughs: initialWtTours, reviews: initialReviews, showOnboarding }) => {
         if (!mounted) return;
         setContext(ctx);
         setWorktrees(wts);
@@ -485,6 +487,9 @@ export const App: React.FC = () => {
         }
         if (initialReviews.length > 0) {
           setReviews(initialReviews);
+        }
+        if (showOnboarding) {
+          setOnboardingOpen(true);
         }
 
         const initialWt =
@@ -660,8 +665,14 @@ export const App: React.FC = () => {
         runActionRef.current(event.action as IdeAction);
       } else if (event.type === "review-updated") {
         setReviews(event.reviews);
+        if (event.reviews.length > 0) {
+          setOnboardingOpen(false);
+        }
       } else if (event.type === "walkthrough-updated") {
         setWalkthroughs(event.walkthroughs);
+        if (event.walkthroughs.length > 0) {
+          setOnboardingOpen(false);
+        }
         if (event.walkthroughs.length === 0) {
           setViewedStepId("");
           lastNavigatedStepBySessionRef.current = {};
@@ -779,6 +790,15 @@ export const App: React.FC = () => {
       showToast(err instanceof Error ? err.message : String(err));
     }
   }, [showToast]);
+
+  const handleFinishOnboarding = useCallback(async () => {
+    setOnboardingOpen(false);
+    try {
+      await window.ide2.completeOnboarding();
+    } catch {
+      // Non-fatal
+    }
+  }, []);
 
   const handleSendReviewFeedback = useCallback(
     async (opts?: { includeOutdated?: boolean; resolveAfterSend?: boolean }) => {
@@ -926,6 +946,10 @@ export const App: React.FC = () => {
           break;
         case "copy-walkthrough-prompt":
           void handleCopyWalkthroughPrompt();
+          break;
+        case "show-onboarding":
+          setAgentMenuOpen(false);
+          setOnboardingOpen(true);
           break;
         case "recent-files":
           setRecentPopupOpen((v) => !v);
@@ -1733,38 +1757,43 @@ export const App: React.FC = () => {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => setSearchPopup({ open: true, tab: "all" })}
-            title="Search Everywhere (Shift+Shift)"
+          <div
+            data-tour-anchor="nav-diff"
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
           >
-            <IconSearch size={13} />
-            <span>Search</span>
-            <span className="kbd-hint">⇧⇧</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => setFindInPathOpen(true)}
-            title={`Find in Path (${formatShortcut("find-in-path", platform)})`}
-          >
-            <span>Find in Path</span>
-            <span className="kbd-hint">{formatShortcut("find-in-path", platform)}</span>
-          </button>
-          {activeTab && (
             <button
               type="button"
-              className={`btn${activeTab.viewKind === "diff" ? " btn-primary" : " btn-ghost"}`}
-              onClick={() => runAction("toggle-diff")}
-              title={`Toggle Diff (${formatShortcut("toggle-diff", platform)})`}
+              className="btn btn-ghost"
+              onClick={() => setSearchPopup({ open: true, tab: "all" })}
+              title="Search Everywhere (Shift+Shift)"
             >
-              <IconDiff size={13} />
-              <span>Diff</span>
-              <span className="kbd-hint">{formatShortcut("toggle-diff", platform)}</span>
+              <IconSearch size={13} />
+              <span>Search</span>
+              <span className="kbd-hint">⇧⇧</span>
             </button>
-          )}
-          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setFindInPathOpen(true)}
+              title={`Find in Path (${formatShortcut("find-in-path", platform)})`}
+            >
+              <span>Find in Path</span>
+              <span className="kbd-hint">{formatShortcut("find-in-path", platform)}</span>
+            </button>
+            {activeTab && (
+              <button
+                type="button"
+                className={`btn${activeTab.viewKind === "diff" ? " btn-primary" : " btn-ghost"}`}
+                onClick={() => runAction("toggle-diff")}
+                title={`Toggle Diff (${formatShortcut("toggle-diff", platform)})`}
+              >
+                <IconDiff size={13} />
+                <span>Diff</span>
+                <span className="kbd-hint">{formatShortcut("toggle-diff", platform)}</span>
+              </button>
+            )}
+          </div>
+          <div data-tour-anchor="agent-menu" style={{ position: "relative" }}>
             <button
               type="button"
               className="btn btn-ghost"
@@ -1852,12 +1881,42 @@ export const App: React.FC = () => {
                     Agent guides you top-down via `ide2 tour`
                   </span>
                 </button>
+                <div style={{ height: "1px", background: "var(--faint)", margin: "4px 6px" }} />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="ide2-project-menu-item"
+                  onClick={() => {
+                    setAgentMenuOpen(false);
+                    setOnboardingOpen(true);
+                  }}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: "2px",
+                    width: "100%",
+                    padding: "6px 8px",
+                    borderRadius: "5px",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--ink)",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontWeight: 500 }}>Replay ide2 Quick Tour</span>
+                  <span style={{ fontSize: "11px", color: "var(--dim)" }}>
+                    Highlight core worktree, diff &amp; review features
+                  </span>
+                </button>
               </div>
             )}
           </div>
           {review?.awaitingUser ? (
             <button
               type="button"
+              data-tour-anchor="export-review"
               className="btn btn-primary"
               onClick={() => {
                 if (openWtAnnotationCount > 0) {
@@ -1876,6 +1935,7 @@ export const App: React.FC = () => {
           ) : (
             <button
               type="button"
+              data-tour-anchor="export-review"
               className="btn btn-primary"
               onClick={() => setExportModalOpen(true)}
               title={`Preview & Export Feedback Prompt (${formatShortcut("export-prompt-preview", platform)})`}
@@ -2490,6 +2550,15 @@ export const App: React.FC = () => {
         );
       })()}
 
+      {/* First-Run Onboarding Walkthrough */}
+      <OnboardingTour
+        open={onboardingOpen}
+        platform={platform}
+        onFinish={handleFinishOnboarding}
+        onCopyReviewPrompt={handleCopyReviewPrompt}
+        onCopyWalkthroughPrompt={handleCopyWalkthroughPrompt}
+      />
+
       {/* Toast Notification */}
       {toast && (
         <div
@@ -2498,7 +2567,7 @@ export const App: React.FC = () => {
             position: "fixed",
             right: "16px",
             bottom: "38px",
-            zIndex: 1200,
+            zIndex: 2100,
             background: "var(--wash)",
             color: "var(--ink)",
             border: "1px solid var(--border-strong)",

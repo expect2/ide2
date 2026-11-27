@@ -15,6 +15,7 @@ import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { IntelClient } from "./intel/client.js";
 import { AnnotationStore } from "./services/annotations.js";
 import { resolveRepoContext, WorktreeService } from "./services/git.js";
+import { PreferencesStore } from "./services/preferences.js";
 import { RecentProjectsStore } from "./services/recent-projects.js";
 import { TourServer } from "./services/tour-server.js";
 import { MultiWorktreeWatcher } from "./services/watcher.js";
@@ -140,6 +141,7 @@ interface RepoSession {
 const sessionsByCommonDir = new Map<string, RepoSession>();
 const sessionByWindowId = new Map<number, { session: RepoSession; launchContext: LaunchContext }>();
 const recentProjects = new RecentProjectsStore();
+const preferences = new PreferencesStore();
 let openProjectDialogInFlight = false;
 
 const tourServer = new TourServer({
@@ -480,6 +482,18 @@ function buildAppMenu(): void {
             clipboard.writeText(buildReviewAgentPrompt(bound?.session.context.repoName));
           },
         },
+        {
+          label: "Show Onboarding Walkthrough",
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            if (win && !win.isDestroyed()) {
+              win.webContents.send("ide2:event", {
+                type: "native-shortcut",
+                action: "show-onboarding",
+              } satisfies WorkspaceEvent);
+            }
+          },
+        },
         { type: "separator" },
         { role: "minimize" },
         { role: "zoom" },
@@ -673,12 +687,19 @@ function registerIpcHandlers(): void {
         : session.git.discoverWorktrees(launchContext.initialWorktreePath),
       session.annotations.list(),
     ]);
+    const walkthroughs = tourServer.getWalkthroughStates(session.context.repoCommonDir);
+    const reviews = tourServer.getReviewStates(session.context.repoCommonDir);
     return {
       context: launchContext,
       worktrees,
       annotations,
-      walkthroughs: tourServer.getWalkthroughStates(session.context.repoCommonDir),
-      reviews: tourServer.getReviewStates(session.context.repoCommonDir),
+      walkthroughs,
+      reviews,
+      showOnboarding:
+        !process.env.IDE2_SMOKE_SCREENSHOT &&
+        !preferences.isOnboardingCompleted() &&
+        walkthroughs.length === 0 &&
+        reviews.length === 0,
     };
   });
 
@@ -975,6 +996,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle("ide2:getReviewAgentPrompt", (evt) => {
     const { session } = getWindowSession(evt.sender);
     return buildReviewAgentPrompt(session.context.repoName);
+  });
+
+  ipcMain.handle("ide2:completeOnboarding", () => {
+    preferences.markOnboardingCompleted();
   });
 
   ipcMain.handle("ide2:sendReviewResponse", async (evt, response: ReviewUserResponse) => {

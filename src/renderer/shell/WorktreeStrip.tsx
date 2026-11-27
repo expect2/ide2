@@ -185,6 +185,7 @@ export const WorktreeStrip: React.FC<WorktreeStripProps> = ({
   return (
     <header
       className="ide2-worktree-strip"
+      data-tour-anchor="worktree-strip"
       style={{
         display: "flex",
         alignItems: "center",
