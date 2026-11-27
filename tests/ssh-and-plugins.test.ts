@@ -515,4 +515,130 @@ describe("GitHub-style Git Plugin Installer, PR Checks Lens & Remote SSH Daemon"
       delete process.env.TEST_REMOTE_HOME;
     }
   }, 25000);
+
+  it("hot-reloads linked plugins live when installed via CLI and when src/server.ts or src/client.tsx is edited", async () => {
+    const ide2Home = makeTempDir("ide2-hotreload-home-");
+    const repoDir = makeTempDir("ide2-hotreload-repo-");
+    const linkedPluginDir = makeTempDir("ide2-linked-plugin-");
+    initGitRepo(repoDir);
+
+    scaffoldPluginStarter(linkedPluginDir, "hot-lens");
+    writeFileSync(
+      join(linkedPluginDir, "src/server.ts"),
+      [
+        'import { defineServerPlugin } from "@expect2/ide2-plugin/server";',
+        "export default defineServerPlugin((ctx) => {",
+        '  ctx.handleRpc("version", () => ({ rev: 1 }));',
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const intel = new IntelClient();
+    const tourServer = new TourServer({
+      ensureRepoWindow: async () => {
+        throw new Error("unused");
+      },
+      broadcastWalkthrough: () => {},
+    });
+    const backend = await LocalWorkspaceBackend.create({
+      targetPath: repoDir,
+      intel,
+      tourServer,
+    });
+
+    const snapshots: Array<{ updatedAt: number }> = [];
+    const host = new PluginHost({
+      backend,
+      storageRoot: ide2Home,
+      scope: "local",
+      hostAffinityFilter: "all",
+      onStateChanged: (snap) => {
+        const p = snap.plugins.find((x) => x.id === "hot-lens");
+        if (p) snapshots.push({ updatedAt: p.updatedAt });
+      },
+    });
+    backend.attachPluginController(host);
+    await host.start();
+
+    // 1. Install externally via a separate PluginInstaller (simulating `ide2 plugin install ./hot-lens --link` from terminal while ide2 is already open!)
+    const cliInstaller = new PluginInstaller(ide2Home, "local");
+    const installRes = await cliInstaller.install({
+      spec: linkedPluginDir,
+      linkLocal: true,
+      approvePermissions: true,
+    });
+    expect(installRes.error).toBeUndefined();
+
+    // Wait for lock.json watcher to auto-load `hot-lens`
+    const waitUntil = async (fn: () => Promise<boolean>, timeoutMs = 4000) => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (await fn()) return;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      throw new Error("Timed out waiting for hot-reload condition");
+    };
+
+    await waitUntil(async () => {
+      try {
+        const res = (await backend.callPluginRpc({
+          pluginId: "hot-lens",
+          method: "version",
+        })) as { rev: number };
+        return res.rev === 1;
+      } catch {
+        return false;
+      }
+    });
+
+    const beforeStamp = (await host.listPlugins()).find((p) => p.id === "hot-lens")!.updatedAt;
+
+    // 2. Edit src/server.ts & src/client.tsx directly in the linked folder -> watcher rebuilds, reloads server, and bumps updatedAt (cache-busting client.js)
+    writeFileSync(
+      join(linkedPluginDir, "src/server.ts"),
+      [
+        'import { defineServerPlugin } from "@expect2/ide2-plugin/server";',
+        "export default defineServerPlugin((ctx) => {",
+        '  ctx.handleRpc("version", () => ({ rev: 2 }));',
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      join(linkedPluginDir, "src/client.tsx"),
+      [
+        'import React from "react";',
+        'import { defineClientPlugin, PluginPanel } from "@expect2/ide2-plugin/client";',
+        "export default defineClientPlugin((ctx) => {",
+        '  ctx.registerToolWindow("panel", () => <PluginPanel title="HOT_REV_2">v2</PluginPanel>);',
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await waitUntil(async () => {
+      try {
+        const res = (await backend.callPluginRpc({
+          pluginId: "hot-lens",
+          method: "version",
+        })) as { rev: number };
+        return res.rev === 2;
+      } catch {
+        return false;
+      }
+    });
+
+    const afterStamp = (await host.listPlugins()).find((p) => p.id === "hot-lens")!.updatedAt;
+    expect(afterStamp).toBeGreaterThan(beforeStamp);
+
+    const clientCode = await host.readPluginClientBundle("hot-lens");
+    expect(clientCode).toContain("HOT_REV_2");
+
+    await backend.dispose();
+    await intel.dispose();
+  }, 15000);
 });

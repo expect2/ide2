@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  watch,
+  type FSWatcher,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -58,7 +65,9 @@ export class PluginHost implements PluginRuntimeController {
   private readonly decorationsByPlugin = new Map<string, PluginLineDecoration[]>();
   private readonly runtimeErrors = new Map<string, string>();
   private readonly activeLoadedIds = new Set<string>();
+  private readonly reloadStampByPlugin = new Map<string, number>();
   private readonly linkWatchers = new Map<string, FSWatcher>();
+  private lockDirWatcher: FSWatcher | null = null;
   private readonly cardSessions = new Map<string, PendingCardSession>();
 
   private worker: Worker | null = null;
@@ -101,6 +110,27 @@ export class PluginHost implements PluginRuntimeController {
     });
 
     await this.reconcileActivePlugins();
+    this.startLockDirWatcher();
+  }
+
+  private startLockDirWatcher(): void {
+    if (this.lockDirWatcher || this.disposed) return;
+    try {
+      mkdirSync(this.installer.pluginsDir, { recursive: true });
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      this.lockDirWatcher = watch(this.installer.pluginsDir, (_evt, filename) => {
+        if (!filename || filename === "lock.json" || filename.startsWith("lock.json.")) {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            if (!this.disposed) {
+              void this.reconcileActivePlugins();
+            }
+          }, 150);
+        }
+      });
+    } catch {
+      // Non-fatal if OS watcher unavailable
+    }
   }
 
   private initRunner(): void {
@@ -330,14 +360,30 @@ export class PluginHost implements PluginRuntimeController {
 
   private ensureLinkWatcher(plugin: InstalledPluginInfo): void {
     if (this.linkWatchers.has(plugin.id)) return;
-    const dir = this.installer.getPluginDir(plugin.id);
-    const srcDir = join(dir, "src");
-    const watchTarget = existsSync(srcDir) ? srcDir : dir;
+    const rawDir = this.installer.getPluginDir(plugin.id);
+    let watchTarget = rawDir;
+    try {
+      // Resolve symlink target so macOS FSEvents observes edits inside the linked repo
+      watchTarget = realpathSync(rawDir);
+    } catch {
+      watchTarget = rawDir;
+    }
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     try {
       const watcher = watch(watchTarget, { recursive: true }, (_evt, filename) => {
-        if (!filename || filename.includes(".ide2-build")) return;
+        if (!filename) return;
+        const norm = String(filename).replace(/\\/g, "/");
+        if (
+          norm.startsWith(".ide2-build") ||
+          norm.includes("/.ide2-build") ||
+          norm.startsWith(".git") ||
+          norm.includes("/.git") ||
+          norm.startsWith("node_modules") ||
+          norm.includes("/node_modules")
+        ) {
+          return;
+        }
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           void this.reloadPlugin(plugin.id);
@@ -364,6 +410,8 @@ export class PluginHost implements PluginRuntimeController {
     const dir = this.installer.getPluginDir(pluginId);
     try {
       await bundlePluginDirectory(dir, target.manifest);
+      const prevStamp = this.reloadStampByPlugin.get(pluginId) ?? target.updatedAt;
+      this.reloadStampByPlugin.set(pluginId, Math.max(Date.now(), prevStamp + 1));
       this.activeLoadedIds.delete(pluginId);
       await this.callRunner("unloadPlugin", { pluginId }).catch(() => {});
       await this.reconcileActivePlugins();
@@ -383,6 +431,7 @@ export class PluginHost implements PluginRuntimeController {
       })
       .map((p) => ({
         ...p,
+        updatedAt: Math.max(p.updatedAt, this.reloadStampByPlugin.get(p.id) ?? 0),
         error: p.error ?? this.runtimeErrors.get(p.id),
       }));
   }
@@ -577,6 +626,10 @@ export class PluginHost implements PluginRuntimeController {
     if (this.disposed) return;
     this.disposed = true;
     this.unsubBackend?.();
+    if (this.lockDirWatcher) {
+      this.lockDirWatcher.close();
+      this.lockDirWatcher = null;
+    }
     for (const w of this.linkWatchers.values()) w.close();
     this.linkWatchers.clear();
     for (const [, c] of this.cardSessions) {
