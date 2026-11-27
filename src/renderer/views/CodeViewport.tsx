@@ -13,9 +13,11 @@ import type {
   CodeSymbol,
   FileDocument,
   LineBlame,
+  PluginLineDecoration,
   SymbolKind,
   TokenSpan,
 } from "../../shared/protocol";
+import { PluginDecorationCards } from "../plugins/runtime-host";
 import { AnnotationComposer, AnnotationThreadCard } from "./AnnotationCard";
 
 export interface CodeViewportHandle {
@@ -33,6 +35,8 @@ export interface CodeViewportProps {
   blame?: LineBlame[];
   showBlame?: boolean;
   annotations?: Annotation[];
+  pluginDecorations?: PluginLineDecoration[];
+  onOpenExternalUrl?: (url: string) => void;
   activeLine?: number;
   scrollToRequest?: {
     line: number;
@@ -304,6 +308,8 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
       blame,
       showBlame = false,
       annotations = [],
+      pluginDecorations = [],
+      onOpenExternalUrl,
       activeLine,
       scrollToRequest,
       recentlyUpdatedAt,
@@ -559,6 +565,19 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
       }
       return { threadsByLine: threads, gutterByLine: gutter };
     }, [annotations, doc.lines.length]);
+
+    const pluginDecsByLine = useMemo(() => {
+      const map = new Map<number, PluginLineDecoration[]>();
+      const maxLine = Math.max(1, doc.lines.length);
+      for (const dec of pluginDecorations) {
+        if (dec.side === "old") continue;
+        const anchor = Math.max(1, Math.min(maxLine, dec.endLine ?? dec.startLine));
+        const list = map.get(anchor);
+        if (list) list.push(dec);
+        else map.set(anchor, [dec]);
+      }
+      return map;
+    }, [pluginDecorations, doc.lines.length]);
 
     const flatSymbols = useMemo(() => flattenSymbols(symbols), [symbols]);
 
@@ -927,6 +946,7 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
               const blameEntry = showBlame ? blame?.[lineIndex] : undefined;
               const gutterAnns = gutterByLine.get(lineNumber) ?? [];
               const threadAnns = threadsByLine.get(lineNumber) ?? [];
+              const linePluginDecs = pluginDecsByLine.get(lineNumber) ?? [];
               const showComposerHere = composerRange?.endLine === lineNumber;
 
               const isSelected =
@@ -1078,10 +1098,28 @@ export const CodeViewport = forwardRef<CodeViewportHandle, CodeViewportProps>(
                     </div>
                   </div>
 
-                  {/* Inline Annotation Thread, Walkthrough Card & Composer */}
-                  {(threadAnns.length > 0 || showComposerHere || showSpotlightCardHere) && (
+                  {/* Inline Annotation Thread, Plugin Decorations, Walkthrough Card & Composer */}
+                  {(threadAnns.length > 0 ||
+                    linePluginDecs.length > 0 ||
+                    showComposerHere ||
+                    showSpotlightCardHere) && (
                     <div className="code-inline-slot">
                       {showSpotlightCardHere && spotlight?.card}
+                      {linePluginDecs.length > 0 && (
+                        <PluginDecorationCards
+                          decorations={linePluginDecs}
+                          onOpenExternalUrl={onOpenExternalUrl}
+                          onQuickAnnotate={
+                            onCreateAnnotation
+                              ? (dec) =>
+                                  openComposerForRange(
+                                    dec.startLine,
+                                    dec.endLine ?? dec.startLine,
+                                  )
+                              : undefined
+                          }
+                        />
+                      )}
                       {threadAnns.length > 0 && (
                         <AnnotationThreadCard
                           annotations={threadAnns}

@@ -1,11 +1,24 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { basename, join } from "node:path";
 import uFuzzy from "@leeoniya/ufuzzy";
-import { rgPath as bundledRgPath } from "@vscode/ripgrep";
 import { buildSafeGitArgs, toPosixPath } from "../../shared/guard";
 import type { FileGitStatus, FindInPathQuery, FuzzyFileHit, SearchMatch } from "../../shared/protocol";
+
+const localRequire = createRequire(import.meta.url);
+
+function loadBundledRipgrepPath(): string {
+  try {
+    const mod = localRequire("@vscode/ripgrep") as { rgPath?: string };
+    return typeof mod.rgPath === "string" && mod.rgPath ? mod.rgPath : "rg";
+  } catch {
+    return "rg";
+  }
+}
+
+const bundledRgPath = loadBundledRipgrepPath();
 
 export interface SearchWorktreeInput {
   path: string;

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, extname, join } from "node:path";
 import uFuzzy from "@leeoniya/ufuzzy";
-import Parser from "web-tree-sitter";
+import type Parser from "web-tree-sitter";
 import { insideWorktree, toPosixPath } from "../../shared/guard";
 import type { CodeSymbol, SearchMatch, SymbolKind } from "../../shared/protocol";
 import { findInPath, worktreeFileIndex } from "./search";
@@ -53,9 +53,12 @@ function getTreeSitterWasmsOutDir(): string {
 
 type ParserConstructor = typeof Parser;
 
-function getParserClass(): ParserConstructor {
-  const mod = Parser as unknown as { default?: ParserConstructor };
-  return mod.default ?? Parser;
+async function loadParserModule(): Promise<ParserConstructor> {
+  const mod = (await import("web-tree-sitter")) as unknown as {
+    default?: ParserConstructor;
+    Parser?: ParserConstructor;
+  } & ParserConstructor;
+  return mod.default ?? mod.Parser ?? mod;
 }
 
 let parserInitPromise: Promise<void> | null = null;
@@ -63,15 +66,15 @@ const loadedLanguages = new Map<TreeSitterLangId, Parser.Language>();
 const loadingLanguages = new Map<TreeSitterLangId, Promise<Parser.Language | null>>();
 
 async function ensureParserReady(): Promise<ParserConstructor> {
-  const ParserClass = getParserClass();
+  const initial = await loadParserModule();
   if (!parserInitPromise) {
     const runtimeWasm = getTreeSitterRuntimeWasmPath();
-    parserInitPromise = ParserClass.init({
+    parserInitPromise = initial.init({
       locateFile: () => runtimeWasm,
     });
   }
   await parserInitPromise;
-  return ParserClass;
+  return loadParserModule();
 }
 
 async function getLanguageGrammar(langId: TreeSitterLangId): Promise<Parser.Language | null> {

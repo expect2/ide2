@@ -1,6 +1,5 @@
 import { extname } from "node:path";
-import { createHighlighter, type BundledLanguage, type Highlighter, type ThemeRegistration } from "shiki";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import type { BundledLanguage, Highlighter, ThemeRegistration } from "shiki";
 import type { TokenSpan } from "../../shared/protocol";
 
 export type TokenClass = TokenSpan["cls"];
@@ -310,18 +309,28 @@ class LruTokenCache {
 }
 
 export class ColdTonalHighlighter {
-  private highlighterPromise: Promise<Highlighter> | null = null;
+  private highlighterPromise: Promise<Highlighter | null> | null = null;
   private readonly loadedLangs = new Set<string>();
   private readonly loadingLangs = new Map<string, Promise<boolean>>();
   private readonly cache = new LruTokenCache(LRU_CACHE_CAPACITY);
 
-  private getHighlighter(): Promise<Highlighter> {
+  private getHighlighter(): Promise<Highlighter | null> {
     if (!this.highlighterPromise) {
-      this.highlighterPromise = createHighlighter({
-        themes: [EXPECT2_RETROFUTURE_NIGHT_THEME],
-        langs: [],
-        engine: createJavaScriptRegexEngine({ forgiving: true }),
-      });
+      this.highlighterPromise = (async () => {
+        try {
+          const [{ createHighlighter }, { createJavaScriptRegexEngine }] = await Promise.all([
+            import("shiki"),
+            import("shiki/engine/javascript"),
+          ]);
+          return await createHighlighter({
+            themes: [EXPECT2_RETROFUTURE_NIGHT_THEME],
+            langs: [],
+            engine: createJavaScriptRegexEngine({ forgiving: true }),
+          });
+        } catch {
+          return null;
+        }
+      })();
     }
     return this.highlighterPromise;
   }
@@ -377,6 +386,11 @@ export class ColdTonalHighlighter {
     }
 
     const highlighter = await this.getHighlighter();
+    if (!highlighter) {
+      const fallback = lexFallbackLines(lines);
+      if (cacheKey) this.cache.set(cacheKey, fallback);
+      return fallback;
+    }
     const ready = await this.ensureLanguageLoaded(highlighter, shikiLang);
     if (!ready) {
       const fallback = lexFallbackLines(lines);

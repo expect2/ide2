@@ -5,6 +5,7 @@ import type {
   ExportPromptOptions,
   FindInPathQuery,
   Ide2Bridge,
+  InstallPluginParams,
   ReviewUserResponse,
   UpdateAnnotationInput,
   WalkthroughUserResponse,
@@ -32,9 +33,12 @@ const bridge: Ide2Bridge = {
   searchSymbols: (params) => ipcRenderer.invoke("ide2:searchSymbols", params),
   findDefinitionAndUsages: (params) => ipcRenderer.invoke("ide2:findDefinitionAndUsages", params),
   findInPath: (query: FindInPathQuery) => ipcRenderer.invoke("ide2:findInPath", query),
-  listAnnotations: (worktreePath?: string) => ipcRenderer.invoke("ide2:listAnnotations", worktreePath),
-  createAnnotation: (input: CreateAnnotationInput) => ipcRenderer.invoke("ide2:createAnnotation", input),
-  updateAnnotation: (input: UpdateAnnotationInput) => ipcRenderer.invoke("ide2:updateAnnotation", input),
+  listAnnotations: (worktreePath?: string) =>
+    ipcRenderer.invoke("ide2:listAnnotations", worktreePath),
+  createAnnotation: (input: CreateAnnotationInput) =>
+    ipcRenderer.invoke("ide2:createAnnotation", input),
+  updateAnnotation: (input: UpdateAnnotationInput) =>
+    ipcRenderer.invoke("ide2:updateAnnotation", input),
   deleteAnnotation: (id: string) => ipcRenderer.invoke("ide2:deleteAnnotation", id),
   compileFeedbackPrompt: (options: ExportPromptOptions) =>
     ipcRenderer.invoke("ide2:compileFeedbackPrompt", options),
@@ -42,7 +46,11 @@ const bridge: Ide2Bridge = {
   openExternalUrl: (url: string) => ipcRenderer.invoke("ide2:openExternalUrl", url),
   revealInOs: (targetPath: string) => ipcRenderer.invoke("ide2:revealInOs", targetPath),
   createWorktree: (params) => ipcRenderer.invoke("ide2:createWorktree", params),
-  openProjectWindow: (targetPath?: string) => ipcRenderer.invoke("ide2:openProjectWindow", targetPath),
+  openProjectWindow: (targetPath?: string) =>
+    ipcRenderer.invoke("ide2:openProjectWindow", targetPath),
+  connectSshWindow: (params) => ipcRenderer.invoke("ide2:connectSshWindow", params),
+  bootstrapRemoteSsh: () => ipcRenderer.invoke("ide2:bootstrapRemoteSsh"),
+  reconnectRemoteSsh: () => ipcRenderer.invoke("ide2:reconnectRemoteSsh"),
   listRecentProjects: () => ipcRenderer.invoke("ide2:listRecentProjects"),
   respondWalkthrough: (response: WalkthroughUserResponse) =>
     ipcRenderer.invoke("ide2:respondWalkthrough", response),
@@ -51,6 +59,16 @@ const bridge: Ide2Bridge = {
   sendReviewResponse: (response: ReviewUserResponse) =>
     ipcRenderer.invoke("ide2:sendReviewResponse", response),
   getReviewAgentPrompt: () => ipcRenderer.invoke("ide2:getReviewAgentPrompt"),
+  completeOnboarding: () => ipcRenderer.invoke("ide2:completeOnboarding"),
+  listPlugins: () => ipcRenderer.invoke("ide2:listPlugins"),
+  installPlugin: (params: InstallPluginParams) =>
+    ipcRenderer.invoke("ide2:installPlugin", params),
+  setPluginEnabled: (params) => ipcRenderer.invoke("ide2:setPluginEnabled", params),
+  updatePlugin: (params) => ipcRenderer.invoke("ide2:updatePlugin", params),
+  removePlugin: (params) => ipcRenderer.invoke("ide2:removePlugin", params),
+  callPluginRpc: (params) => ipcRenderer.invoke("ide2:callPluginRpc", params),
+  triggerPluginAction: (params) => ipcRenderer.invoke("ide2:triggerPluginAction", params),
+  respondPluginCard: (params) => ipcRenderer.invoke("ide2:respondPluginCard", params),
   onEvent: (listener: (event: WorkspaceEvent) => void) => {
     const handler = (_evt: Electron.IpcRendererEvent, payload: WorkspaceEvent) => {
       listener(payload);

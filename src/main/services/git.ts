@@ -246,6 +246,41 @@ function parseTargetLocation(targetPath: string): {
   return { fsPath: resolvedDirect };
 }
 
+function readRemoteOriginFromGitConfig(repoCommonDir: string): string | undefined {
+  try {
+    const configPath = resolve(repoCommonDir, "config");
+    if (!existsSync(configPath)) return undefined;
+    const raw = readFileSync(configPath, "utf8");
+    const lines = raw.split(/\r?\n/);
+    let inRemoteOrigin = false;
+    let firstRemoteUrl: string | undefined;
+    let inAnyRemote = false;
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+      if (line.startsWith("[") && line.endsWith("]")) {
+        const header = line.slice(1, -1).trim();
+        inRemoteOrigin = /^remote\s+"origin"$/i.test(header);
+        inAnyRemote = /^remote\s+".+"$/i.test(header);
+        continue;
+      }
+      const eqIdx = line.indexOf("=");
+      if (eqIdx > 0) {
+        const key = line.slice(0, eqIdx).trim().toLowerCase();
+        const val = line.slice(eqIdx + 1).trim();
+        if (key === "url" && val) {
+          if (inRemoteOrigin) return val;
+          if (inAnyRemote && !firstRemoteUrl) firstRemoteUrl = val;
+        }
+      }
+    }
+    return firstRemoteUrl;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolves a CLI target path (repo root, nested dir, file, or `file.ts:line[:col]`)
  * into canonical git repository & launch context.
@@ -286,6 +321,8 @@ export async function resolveRepoContext(targetPath: string): Promise<LaunchCont
     }
   }
 
+  const remoteOriginUrl = readRemoteOriginFromGitConfig(repoCommonDir);
+
   return {
     repoCommonDir,
     repoName,
@@ -293,6 +330,7 @@ export async function resolveRepoContext(targetPath: string): Promise<LaunchCont
     initialFilePath,
     initialLine,
     initialColumn,
+    remoteOriginUrl,
     platform: currentPlatform(),
   };
 }

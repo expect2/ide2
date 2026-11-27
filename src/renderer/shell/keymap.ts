@@ -27,7 +27,10 @@ export type IdeAction =
   | "copy-feedback-prompt"
   | "switch-worktree"
   | "open-project-window"
+  | "connect-ssh"
+  | "manage-plugins"
   | "copy-walkthrough-prompt"
+  | "show-onboarding"
   | "close-tab"
   | "prev-tab"
   | "next-tab"
@@ -199,10 +202,28 @@ export const IDE_ACTIONS: readonly ActionDescriptor[] = [
     category: "Navigation",
   },
   {
+    action: "connect-ssh",
+    label: "Connect to Remote via SSH…",
+    description: "Open a remote repository over SSH using the headless ide2 daemon",
+    category: "Navigation",
+  },
+  {
+    action: "manage-plugins",
+    label: "Manage Plugins…",
+    description: "Install, update, enable, or remove ide2 plugins from GitHub repositories",
+    category: "Tool Windows",
+  },
+  {
     action: "copy-walkthrough-prompt",
     label: "Copy Walkthrough Prompt for Agent",
     description: "Copy ready-to-paste prompt so any coding agent can guide you through this repo",
     category: "Review",
+  },
+  {
+    action: "show-onboarding",
+    label: "Show Onboarding Walkthrough",
+    description: "Replay the interactive first-run overview of ide2's core features",
+    category: "Navigation",
   },
   {
     action: "close-tab",
@@ -538,6 +559,12 @@ export function formatShortcut(action: IdeAction, platform: Platform): string {
       return isMac ? "⇧⌘N" : "Ctrl+Shift+N";
     case "copy-walkthrough-prompt":
       return isMac ? "⇧⌘T" : "Ctrl+Shift+T";
+    case "connect-ssh":
+      return "";
+    case "manage-plugins":
+      return "";
+    case "show-onboarding":
+      return "";
     case "close-tab":
       return isMac ? "⌘W" : "Ctrl+W";
     case "prev-tab":

@@ -30,6 +30,16 @@ import type {
 } from "../../shared/protocol.js";
 import { getTourEndpointPaths } from "../../shared/walkthrough-prompt.js";
 
+export interface PluginCliRpcParams {
+  cwd: string;
+  worktree?: string;
+  subcommand: string;
+  argv: string[];
+  stdin?: string;
+  wait?: boolean;
+  waitTimeoutMs?: number;
+}
+
 export interface TourHostAdapter {
   ensureRepoWindow(params: {
     cwd: string;
@@ -44,6 +54,7 @@ export interface TourHostAdapter {
   }>;
   broadcastWalkthrough(repoCommonDir: string, walkthroughs: WalkthroughState[]): void;
   broadcastReview?: (repoCommonDir: string, reviews: ReviewSessionState[]) => void;
+  handlePluginCli?: (params: PluginCliRpcParams) => Promise<unknown>;
 }
 
 export interface TourStartParams {
@@ -168,7 +179,8 @@ export interface TourRpcRequest {
     | "tour.end"
     | "review.wait"
     | "review.status"
-    | "review.end";
+    | "review.end"
+    | "plugin.cli";
   params?: Record<string, unknown>;
 }
 
@@ -987,6 +999,18 @@ export class TourServer {
             worktree: p.worktree,
             sessionId: p.sessionId,
           });
+          return { id: req.id, ok: true, result };
+        }
+        case "plugin.cli": {
+          if (!this.host.handlePluginCli) {
+            return {
+              id: req.id,
+              ok: false,
+              error: "No plugin CLI handler available in active ide2 host.",
+            };
+          }
+          const p = (req.params ?? {}) as unknown as PluginCliRpcParams;
+          const result = await this.host.handlePluginCli(p);
           return { id: req.id, ok: true, result };
         }
         default: {

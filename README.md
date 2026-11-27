@@ -83,6 +83,48 @@ And your IDE shouldn't *be* your agent. Bundling an AI harness inside an editor 
 - **Tab ergonomics**: JetBrains-style right-click context menu (pin/unpin, close others/left/right/unmodified, split right/down, copy path, open in diff, locate in Project tree).
 - **Multiple projects**: Open additional repositories in separate windows via **Window → Open Project in New Window…** (`⇧⌘N` / `Ctrl+Shift+N`), the top-bar project switcher, or `ide2 /path/to/repo`.
 
+### Remote Repositories over SSH (`ide2 ssh`)
+- Run the native `ide2` desktop UI locally on your laptop while inspecting repositories on remote Linux/macOS servers over SSH — no X11 forwarding or SSHFS needed.
+- **One-click remote bootstrap:** On first connect (`ide2 ssh user@host:/path/to/repo` or **Window → Connect to Remote via SSH…**), `ide2` detects if the remote host doesn't have the headless runtime yet and offers one-click bootstrapping (~350 KB zero-native-dep bundle into `~/.expect2-ide/remote-runtime/`, requiring only Node.js ≥ 18 and Git).
+- **Remote agent loops out of the box:** The remote `ide2 daemon --stdio` hosts `TourServer` on the remote machine, so coding agents running inside remote `tmux` / SSH terminals can run `ide2 review wait`, `ide2 tour`, and `ide2 x <subcommand>` locally with zero port forwarding.
+- Live RTT pill (`SSH:host · 14ms`), automatic exponential-backoff reconnect, and local Shiki + Tree-sitter syntax/AST acceleration.
+
+---
+
+## Plugins
+
+`ide2` stays small at its core by design — and lets you extend what you **see** about your code and how you **steer** terminal agents through lightweight, read-only plugins installed directly from GitHub repositories.
+
+### Installing Plugins from GitHub
+
+Install any plugin repo via the CLI or the in-app **Manage Plugins…** modal (**Statusline → `Plugins`**, **Window → Manage Plugins…**, or **Search Everywhere `⇧⇧`**):
+
+```bash
+ide2 plugin install owner/repo                          # Install from GitHub (default branch)
+ide2 plugin install owner/repo#v0.2.0                   # Pin a tag, branch, or commit SHA
+ide2 plugin install owner/repo/packages/my-lens#main    # Install from a monorepo subdirectory
+ide2 plugin list                                        # Show installed plugins, SHAs & permissions
+ide2 plugin update [plugin-id]                          # Update to latest upstream commit
+ide2 plugin disable <plugin-id>                         # Disable without removing
+ide2 plugin remove <plugin-id>                          # Uninstall cleanly
+```
+
+- **Pinned & permission-gated:** Every GitHub install pins the exact **40-character commit SHA** in `~/.expect2-ide/plugins/lock.json`. Plugins are read-only by default and require explicit approval for elevated permissions (`exec`, `network`, `agent-ipc`).
+- **Dual-host execution (Local & Remote SSH):** `"host": "client"` plugins *(default)* install once on your laptop, use your local credentials (like macOS Keychain `gh` auth), and work across every remote SSH host. `"host": "workspace"` plugins run next to the repo and remote coding agents inside `ide2 daemon`, streaming their UI and line decorations back to your local window.
+- **Built-in reference plugin — GitHub PR & CI Checks Lens ([`plugins/pr-checks`](./plugins/pr-checks)):** Uses your local `gh` CLI to inspect the active branch's Pull Request, renders the **PR & CI Checks** bottom panel, paints failing GitHub Actions file:line annotations directly inline on code & diffs, and appends failing CI context to exported review prompts.
+
+### Create a Plugin with Claude Code or Grok Build
+
+You don't have to write plugins by hand — just describe what you want in **Claude Code**, **Grok Build**, or any coding agent:
+
+> ```text
+> Build an ide2 plugin that reads coverage/lcov.info in the active worktree, highlights uncovered
+> lines added in the current diff, and adds a bottom "Coverage" panel listing the lowest-coverage
+> changed files with click-to-jump. Link it locally so I can try it right away.
+> ```
+
+Edits hot-reload automatically inside `ide2`. Full plugin SDK details live in [`AGENTS.md`](./AGENTS.md#3-creating-an-ide2-plugin).
+
 ---
 
 ## Install
@@ -131,18 +173,24 @@ rm -rf ~/.expect2-ide/app "$(command -v ide2)"
 Run `ide2` inside any Git repository or worktree:
 
 ```bash
-ide2                          # Open the repo/worktree of the current directory
-ide2 /path/to/repo            # Open a specific repository or worktree
-ide2 src/auth/session.ts:141  # Open a file and jump straight to line 141
-ide2 --diff                   # Launch directly in Branch Diff review mode
-ide2 --base develop           # Override the base branch used for diffs
-ide2 --worktree api-v2        # Focus a specific worktree by name or path
-ide2 --export                 # Print the active worktree's Feedback Prompt to stdout
-ide2 --export --resolve       # Print the Feedback Prompt and mark annotations resolved
-ide2 review wait --diff       # Live review loop: receive annotations directly (no copy/paste)
-ide2 tour --help              # Agent-driven interactive codebase walkthrough commands
-ide2 install-skill            # Install unified ide2 SKILL.md (~/.agents/skills/ide2)
-ide2 install-skill --claude   # Install unified ide2 SKILL.md (~/.claude/skills/ide2)
+ide2                                  # Open the repo/worktree of the current directory
+ide2 /path/to/repo                    # Open a specific repository or worktree
+ide2 src/auth/session.ts:141          # Open a file and jump straight to line 141
+ide2 ssh ubuntu@devbox:/srv/repo      # Open a remote repository via headless SSH daemon
+ide2 ssh ubuntu@devbox:~/repo --diff  # Open remote repo in Diff Review mode (--bootstrap to auto-install)
+ide2 plugin install owner/repo        # Install a plugin from GitHub (pinned to exact commit SHA)
+ide2 plugin install ./my-lens --link  # Link a local plugin directory with live hot-reload
+ide2 plugin init ./my-lens            # Scaffold a starter TypeScript/TSX plugin
+ide2 plugin list                      # List installed plugins, pinned SHAs, and permissions
+ide2 --diff                           # Launch directly in Branch Diff review mode
+ide2 --base develop                   # Override the base branch used for diffs
+ide2 --worktree api-v2                # Focus a specific worktree by name or path
+ide2 --export                         # Print the active worktree's Feedback Prompt to stdout
+ide2 --export --resolve               # Print the Feedback Prompt and mark annotations resolved
+ide2 review wait --diff               # Live review loop: receive annotations directly (no copy/paste)
+ide2 tour --help                      # Agent-driven interactive codebase walkthrough commands
+ide2 install-skill                    # Install unified ide2 + plugin SKILL.md (~/.agents/skills/ide2)
+ide2 install-skill --claude           # Install unified ide2 + plugin SKILL.md (~/.claude/skills/ide2)
 ```
 
 | Flag | Description |
@@ -150,6 +198,8 @@ ide2 install-skill --claude   # Install unified ide2 SKILL.md (~/.claude/skills/
 | `-d, --diff` | Open in Diff Review mode |
 | `-b, --base <ref>` | Override the base branch ref for diffing (e.g. `main`) |
 | `-w, --worktree <name>` | Select a worktree by name, branch, or path |
+| `--bootstrap` | With `ide2 ssh`, automatically bootstrap the headless remote runtime if missing |
+| `--ssh-opt <args>` | With `ide2 ssh`, forward extra flags to `ssh` (e.g. `"-p 2222 -i ~/.ssh/id_ed25519"`) |
 | `--export` | Compile and print the Markdown Feedback Prompt to stdout (headless) |
 | `--resolve` | Used with `--export` to mark exported annotations as resolved |
 | `--wait` | Wait until the `ide2` window closes before returning |

@@ -113,12 +113,20 @@ const primaryCtaBtnStyle: React.CSSProperties = {
 
 export type SearchEverywhereTab = "all" | "files" | "symbols" | "worktrees" | "actions";
 
+export interface SearchEverywherePluginAction {
+  pluginId: string;
+  actionId: string;
+  title: string;
+  description?: string;
+}
+
 export interface SearchEverywherePopupProps {
   open: boolean;
   initialTab?: SearchEverywhereTab;
   initialQuery?: string;
   activeWorktree: WorktreeInfo;
   worktrees: readonly WorktreeInfo[];
+  pluginActions?: readonly SearchEverywherePluginAction[];
   platform: Platform;
   onSearchFiles: (params: {
     worktreePath: string;
@@ -133,6 +141,7 @@ export interface SearchEverywherePopupProps {
   onOpenFile: (worktreePath: string, filePath: string, line?: number, column?: number) => void;
   onSelectWorktree: (worktreePath: string) => void;
   onRunAction: (action: IdeAction) => void;
+  onRunPluginAction?: (pluginId: string, actionId: string) => void;
   onClose: () => void;
 }
 
@@ -169,6 +178,14 @@ type SearchResultItem =
       subtitle: string;
       action: IdeAction;
       shortcut: string;
+    }
+  | {
+      kind: "plugin";
+      key: string;
+      title: string;
+      subtitle: string;
+      pluginId: string;
+      actionId: string;
     };
 
 function parseFileLineQuery(raw: string): { text: string; line?: number; column?: number } {
@@ -195,12 +212,14 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
   initialQuery = "",
   activeWorktree,
   worktrees,
+  pluginActions = [],
   platform,
   onSearchFiles,
   onSearchSymbols,
   onOpenFile,
   onSelectWorktree,
   onRunAction,
+  onRunPluginAction,
   onClose,
 }) => {
   const [tab, setTab] = useState<SearchEverywhereTab>(initialTab);
@@ -344,10 +363,27 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
           shortcut: formatShortcut(act.action, platform),
         });
       }
+      const matchedPluginActs = pluginActions.filter(
+        (pa) =>
+          !q ||
+          pa.title.toLowerCase().includes(q) ||
+          (pa.description ?? "").toLowerCase().includes(q) ||
+          pa.pluginId.toLowerCase().includes(q),
+      );
+      for (const pa of matchedPluginActs.slice(0, tab === "all" ? 5 : 25)) {
+        out.push({
+          kind: "plugin",
+          key: `plug:${pa.pluginId}:${pa.actionId}`,
+          title: pa.title,
+          subtitle: pa.description ?? `Plugin: ${pa.pluginId}`,
+          pluginId: pa.pluginId,
+          actionId: pa.actionId,
+        });
+      }
     }
 
     return out;
-  }, [tab, fileHits, symbolHits, worktrees, parsed.text, parsed.line, parsed.column, platform]);
+  }, [tab, fileHits, symbolHits, worktrees, pluginActions, parsed.text, parsed.line, parsed.column, platform]);
 
   useEffect(() => {
     setSelectedIndex((prev) => (items.length === 0 ? 0 : Math.min(prev, items.length - 1)));
@@ -372,6 +408,10 @@ export const SearchEverywherePopup: React.FC<SearchEverywherePopupProps> = ({
       case "action":
         onClose();
         onRunAction(item.action);
+        break;
+      case "plugin":
+        onClose();
+        onRunPluginAction?.(item.pluginId, item.actionId);
         break;
     }
   };

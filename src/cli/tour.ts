@@ -675,15 +675,50 @@ function installUnifiedSkill(options: {
   dir?: string;
   claude?: boolean;
 }): string {
-  const baseDir = options.dir
+  const skillsParent = options.dir
     ? resolve(options.cwd, options.dir)
     : options.claude
       ? join(homedir(), ".claude", "skills", "ide2")
       : join(homedir(), ".agents", "skills", "ide2");
-  mkdirSync(baseDir, { recursive: true });
-  const skillPath = join(baseDir, "SKILL.md");
+  mkdirSync(skillsParent, { recursive: true });
+  const skillPath = join(skillsParent, "SKILL.md");
   writeFileSync(skillPath, buildWalkthroughSkillMarkdown(), "utf8");
-  return `Installed ide2 agent skill (walkthrough + live review) to ${skillPath}\n`;
+
+  const installedLines = [
+    `Installed ide2 agent skill (walkthrough + live review) to ${skillPath}`,
+  ];
+
+  // Also install SKILL.md contributed by any enabled ide2 plugins
+  try {
+    const ide2Home = process.env.IDE2_HOME ?? join(homedir(), ".expect2-ide");
+    const lockPath = join(ide2Home, "plugins", "lock.json");
+    if (existsSync(lockPath)) {
+      const lock = JSON.parse(readFileSync(lockPath, "utf8")) as {
+        plugins?: Record<string, { enabled?: boolean }>;
+      };
+      const rootSkillsDir = resolve(skillsParent, "..");
+      for (const [pluginId, rec] of Object.entries(lock.plugins ?? {})) {
+        if (!rec?.enabled) continue;
+        const pDir = join(ide2Home, "plugins", pluginId);
+        const manifestPath = join(pDir, "ide2-plugin.json");
+        if (!existsSync(manifestPath)) continue;
+        const m = JSON.parse(readFileSync(manifestPath, "utf8")) as { skill?: string };
+        const relSkill = m.skill || "./SKILL.md";
+        const srcSkill = resolve(pDir, relSkill);
+        if (existsSync(srcSkill)) {
+          const dstDir = join(rootSkillsDir, `ide2-${pluginId}`);
+          mkdirSync(dstDir, { recursive: true });
+          const dstSkill = join(dstDir, "SKILL.md");
+          writeFileSync(dstSkill, readFileSync(srcSkill, "utf8"), "utf8");
+          installedLines.push(`Installed plugin skill (${pluginId}) to ${dstSkill}`);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal plugin skill sync error
+  }
+
+  return `${installedLines.join("\n")}\n`;
 }
 
 export async function runCliInstallSkill(options: {
